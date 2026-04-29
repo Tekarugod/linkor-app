@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeuroSpace v2.1 — Neural Knowledge Graph</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===== GATE ===== -->
+<div id="gate" class="page active">
+    <div class="gate-bg-grid"></div>
+    <div class="gate-card">
+        <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+        <div class="gate-logo">NeuroSpace</div>
+        <div class="gate-subtitle">// digital memory expander v2.1</div>
+
+        <div class="gate-tabs">
+            <button class="gate-tab active" onclick="switchTab('login')">Вход</button>
+            <button class="gate-tab" onclick="switchTab('register')">Регистрация</button>
+        </div>
+
+        <div id="login-form">
+            <div class="gate-input-group">
+                <label class="gate-label">Идентификатор</label>
+                <input class="gate-input" type="text" id="login-email" placeholder="user@neurospace.io">
+            </div>
+            <div class="gate-input-group">
+                <label class="gate-label">Код доступа</label>
+                <input class="gate-input" type="password" id="login-pass" placeholder="••••••••">
+            </div>
+            <button class="gate-btn" onclick="doLogin()"><span>▶ ВОЙТИ В СИСТЕМУ</span></button>
+            <div class="gate-error" id="login-error"></div>
+        </div>
+
+        <div id="register-form" style="display:none">
+            <div class="gate-input-group">
+                <label class="gate-label">Никнейм</label>
+                <input class="gate-input" type="text" id="reg-nick" placeholder="cyber_thinker">
+            </div>
+            <div class="gate-input-group">
+                <label class="gate-label">Email</label>
+                <input class="gate-input" type="email" id="reg-email" placeholder="user@neurospace.io">
+            </div>
+            <div class="gate-input-group">
+                <label class="gate-label">Код доступа</label>
+                <input class="gate-input" type="password" id="reg-pass" placeholder="минимум 6 символов">
+            </div>
+            <button class="gate-btn" onclick="doRegister()"><span>⚡ СОЗДАТЬ АККАУНТ</span></button>
+            <div class="gate-error" id="reg-error"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== HUB ===== -->
+<div id="hub" class="page">
+    <div class="hub-topbar">
+        <div class="hub-logo">NeuroSpace</div>
+        <div class="hub-spacer"></div>
+        <a class="hub-download-btn" href="#" onclick="downloadSite(event)">⬇ Скачать код</a>
+        <button class="hub-download-btn" onclick="showPage('settings')" style="border-color:rgba(123,47,255,0.4);color:var(--accent3)">⚙ Настройки</button>
+        <div class="hub-user">
+            <div class="hub-avatar" id="hub-avatar">NS</div>
+            <span class="hub-username" id="hub-username">NeuroPilot</span>
+        </div>
+        <button class="hub-logout-btn" onclick="doLogout()">ВЫЙТИ</button>
+    </div>
+    <div class="hub-body">
+        <div class="hub-header">
+            <div class="hub-title">Мои <span>Пространства</span></div>
+            <button class="hub-new-btn" onclick="openNewSpaceModal()"><span>＋ НОВОЕ ПРОСТРАНСТВО</span></button>
+        </div>
+        <div class="spaces-grid" id="spaces-grid"></div>
+    </div>
+</div>
+
+<!-- ===== ENGINE ===== -->
+<div id="engine" class="page">
+    <div class="engine-sidebar">
+        <div class="engine-sidebar-top">
+            <button class="engine-back-btn" onclick="showPage('hub')">←</button>
+            <div class="engine-space-name" id="engine-space-name">Пространство</div>
+        </div>
+
+        <div class="engine-sidebar-search">
+            <input type="text" placeholder="🔍 Поиск узлов..." id="node-search" oninput="searchNodes()">
+        </div>
+
+        <div class="quick-capture">
+            <div class="engine-sidebar-title">// Quick Capture</div>
+            <textarea id="quick-capture-input" class="quick-capture-input" placeholder="One thought per line..."></textarea>
+            <button class="quick-capture-btn" onclick="quickCapture()"><span>+ CAPTURE</span></button>
+        </div>
+
+        <div class="engine-sidebar-section">
+            <div class="engine-sidebar-title">// Инструменты</div>
+            <button class="tool-btn active" id="tool-select" onclick="setTool('select')">
+                <span class="tool-btn-icon">↖</span> Выбор
+            </button>
+            <button class="tool-btn" id="tool-node" onclick="setTool('node')">
+                <span class="tool-btn-icon">☐</span> Добавить узел
+            </button>
+            <button class="tool-btn" id="tool-connect" onclick="setTool('connect')">
+                <span class="tool-btn-icon">⤢</span> Связь
+            </button>
+        </div>
+
+        <div class="engine-sidebar-section">
+            <div class="engine-sidebar-title">// Действия</div>
+            <button class="tool-btn" onclick="autoLayout()">
+                <span class="tool-btn-icon">⬡</span> Авто-размещение
+            </button>
+            <button class="tool-btn" onclick="fitView()">
+                <span class="tool-btn-icon">⊡</span> Центрировать
+            </button>
+            <button class="tool-btn" id="smart-connect-btn" onclick="smartConnect()">
+                <span class="tool-btn-icon">🧠</span> Умные связи
+            </button>
+            <button class="tool-btn" onclick="deleteSelected()" id="delete-btn" style="color:var(--accent2);display:none">
+                <span class="tool-btn-icon">✕</span> Удалить
+            </button>
+            <button class="tool-btn" onclick="exportSpaceJSON()">
+                <span class="tool-btn-icon">📋</span> Экспорт JSON
+            </button>
+            <button class="tool-btn" onclick="importSpaceJSON()">
+                <span class="tool-btn-icon">📥</span> Импорт JSON
+            </button>
+            <button class="tool-btn" onclick="toggleAIPanel()">
+                <span class="tool-btn-icon">🧠</span> AI Помощник
+            </button>
+        </div>
+
+        <div class="engine-stats">
+            <div class="engine-sidebar-title">// Статистика</div>
+            <div class="engine-stat-row">
+                <span class="engine-stat-label">УЗЛЫ</span>
+                <span class="engine-stat-value" id="stat-nodes">0</span>
+            </div>
+            <div class="engine-stat-row">
+                <span class="engine-stat-label">СВЯЗИ</span>
+                <span class="engine-stat-value" id="stat-edges">0</span>
+            </div>
+            <div class="engine-stat-row">
+                <span class="engine-stat-label">ПЛОТНОСТЬ</span>
+                <span class="engine-stat-value" id="stat-density">0%</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="engine-canvas-wrap" id="canvas-wrap">
+        <svg class="canvas-grid-svg" id="grid-svg">
+            <defs>
+                <pattern id="smallgrid" width="30" height="30" patternUnits="userSpaceOnUse">
+                    <path d="M 30 0 L 0 0 0 30" fill="none" stroke="rgba(0,245,255,0.04)" stroke-width="0.5"/>
+                </pattern>
+                <pattern id="grid" width="150" height="150" patternUnits="userSpaceOnUse">
+                    <rect width="150" height="150" fill="url(#smallgrid)"/>
+                    <path d="M 150 0 L 0 0 0 150" fill="none" stroke="rgba(0,245,255,0.08)" stroke-width="1"/>
+                </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#grid)"/>
+        </svg>
+
+        <div class="canvas-world" id="canvas-world">
+            <svg class="edges-svg" id="main-edges-svg"></svg>
+        </div>
+
+        <svg id="temp-edge-container" style="position:absolute; inset:0; pointer-events:none; overflow:visible; width:100%; height:100%; z-index:1000;">
+            <path id="temp-edge-path" d="" style="fill:none; stroke:var(--accent); stroke-width:2; stroke-dasharray:6 4; opacity:0.7; display:none;"></path>
+        </svg>
+
+        <div class="connect-mode-indicator" id="connect-indicator">
+            ⚡ РЕЖИМ СВЯЗИ — Выберите целевой узел
+        </div>
+
+        <div class="smart-connect-progress" id="smart-connect-progress" style="display:none">
+            <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+            <div class="progress-text" id="progress-text">Анализ узлов...</div>
+        </div>
+
+        <div class="canvas-controls">
+            <button class="canvas-ctrl-btn" onclick="zoom(1.2)">＋</button>
+            <div class="canvas-zoom-label" id="zoom-label">100%</div>
+            <button class="canvas-ctrl-btn" onclick="zoom(0.8)">－</button>
+            <button class="canvas-ctrl-btn" onclick="fitView()" style="font-size:12px">⊡</button>
+        </div>
+            <!-- AI панель -->
+            <div class="ai-panel" id="ai-panel">
+                <div class="node-editor-title">// AI Ассистент</div>
+                     <button class="editor-close-btn" onclick="toggleAIPanel()" style="margin-bottom:16px;">× ЗАКРЫТЬ</button>
+                <div class="ai-response" id="ai-response-content">
+        Нажмите кнопку 🧠 AI в боковой панели для анализа.
+         </div>
+</div>
+        <div class="node-editor" id="node-editor">
+            <div class="node-editor-title">// Редактор узла</div>
+            <div class="editor-field">
+                <label class="editor-label">Заголовок</label>
+                <input class="editor-input" type="text" id="editor-title" placeholder="Название мысли...">
+            </div>
+            <div class="editor-field">
+                <label class="editor-label">Описание</label>
+                <textarea class="editor-textarea" id="editor-desc" placeholder="Подробное описание..."></textarea>
+            </div>
+            <div class="editor-field">
+                <label class="editor-label">Теги (через запятую)</label>
+                <input class="editor-input" type="text" id="editor-tags" placeholder="идея, проект, важно">
+            </div>
+            <div class="editor-field">
+                <label class="editor-label">Цвет</label>
+                <div class="color-swatches" id="color-swatches"></div>
+            </div>
+            <div class="editor-field">
+                <label class="editor-label">Связанные узлы</label>
+                <div id="editor-connections" class="editor-connections"></div>
+            </div>
+            <button class="editor-save-btn" onclick="saveNodeEdit()"><span>💾 СОХРАНИТЬ</span></button>
+            <button class="editor-close-btn" onclick="closeNodeEditor()">× ЗАКРЫТЬ</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== SETTINGS ===== -->
+<div id="settings" class="page">
+    <div class="settings-sidebar">
+        <div class="settings-sidebar-logo">NeuroSpace</div>
+        <div class="settings-nav-item active" onclick="setSettingsTab('appearance')">
+            <span>🎨</span> Внешний вид
+        </div>
+        <div class="settings-nav-item" onclick="setSettingsTab('profile')">
+            <span>👤</span> Профиль
+        </div>
+        <div class="settings-nav-item" onclick="setSettingsTab('data')">
+            <span>💾</span> Данные
+        </div>
+        <div class="settings-nav-item" onclick="setSettingsTab('about')">
+            <span>ℹ️</span> О системе
+        </div>
+        <button class="settings-back-btn" onclick="showPage('hub')">← НАЗАД В ХАБ</button>
+    </div>
+    <div class="settings-content" id="settings-content"></div>
+</div>
+
+<!-- ===== MODAL ===== -->
+<div class="modal-overlay" id="modal" style="display:none" onclick="handleModalClick(event)">
+    <div class="modal-box" onclick="event.stopPropagation()">
+        <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+        <div class="modal-title" id="modal-title">Новое пространство</div>
+        <div id="modal-body"></div>
+    </div>
+</div>
+
+<!-- ===== TOAST ===== -->
+<div class="toast" id="toast"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
