@@ -58,8 +58,10 @@
     <div class="hub-topbar">
         <div class="hub-logo">NeuroSpace</div>
         <div class="hub-spacer"></div>
-        <a class="hub-download-btn" href="#" onclick="downloadSite(event)">⬇ Скачать код</a>
-        <button class="hub-download-btn" onclick="showPage('settings')" style="border-color:rgba(123,47,255,0.4);color:var(--accent3)">⚙ Настройки</button>
+        <button class="hub-nav-btn plan" onclick="openSubscriptionModal()">Plans</button>
+        <button class="hub-nav-btn locked" onclick="openFriendsLocked()">Friends</button>
+        <a class="hub-nav-btn" href="#" onclick="downloadSite(event)">Export</a>
+        <button class="hub-nav-btn" onclick="showPage('settings')">Settings</button>
         <div class="hub-user">
             <div class="hub-avatar" id="hub-avatar">NS</div>
             <span class="hub-username" id="hub-username">NeuroPilot</span>
@@ -68,8 +70,16 @@
     </div>
     <div class="hub-body">
         <div class="hub-header">
-            <div class="hub-title">Мои <span>Пространства</span></div>
-            <button class="hub-new-btn" onclick="openNewSpaceModal()"><span>＋ НОВОЕ ПРОСТРАНСТВО</span></button>
+            <div>
+                <div class="hub-kicker">Command Center</div>
+                <div class="hub-title">Мои <span>Пространства</span></div>
+            </div>
+            <button class="hub-new-btn" onclick="openNewSpaceModal()"><span>New Space</span></button>
+        </div>
+        <div class="hub-overview" id="hub-overview"></div>
+        <div class="hub-tools">
+            <input class="hub-search" type="text" id="hub-search" placeholder="Search spaces..." oninput="renderHub()">
+            <button class="hub-tool-btn" onclick="openFriendsLocked()">Find Friends <span>Locked</span></button>
         </div>
         <div class="spaces-grid" id="spaces-grid"></div>
     </div>
@@ -93,6 +103,11 @@
             <button class="quick-capture-btn" onclick="quickCapture()"><span>+ CAPTURE</span></button>
         </div>
 
+        <div class="connection-suggestions" id="connection-suggestions">
+            <div class="engine-sidebar-title">// Suggested Links</div>
+            <div class="suggestion-empty">Select a node to see smart link ideas</div>
+        </div>
+
         <div class="engine-sidebar-section">
             <div class="engine-sidebar-title">// Инструменты</div>
             <button class="tool-btn active" id="tool-select" onclick="setTool('select')">
@@ -104,6 +119,12 @@
             <button class="tool-btn" id="tool-connect" onclick="setTool('connect')">
                 <span class="tool-btn-icon">⤢</span> Связь
             </button>
+            <button class="tool-btn" onclick="duplicateSelectedNode()" data-plan="plus">
+                <span class="tool-btn-icon">⧉</span> Дублировать <span class="plan-badge">PLUS</span>
+            </button>
+            <button class="tool-btn" onclick="focusSelectedNode()">
+                <span class="tool-btn-icon">⌖</span> Фокус на узле
+            </button>
         </div>
 
         <div class="engine-sidebar-section">
@@ -114,8 +135,11 @@
             <button class="tool-btn" onclick="fitView()">
                 <span class="tool-btn-icon">⊡</span> Центрировать
             </button>
-            <button class="tool-btn" id="smart-connect-btn" onclick="smartConnect()">
-                <span class="tool-btn-icon">🧠</span> Умные связи
+            <button class="tool-btn" onclick="highlightIsolatedNodes()">
+                <span class="tool-btn-icon">◇</span> Найти одиночные
+            </button>
+            <button class="tool-btn" id="smart-connect-btn" onclick="smartConnect()" data-plan="plus">
+                <span class="tool-btn-icon">⌁</span> Умные связи <span class="plan-badge">PLUS</span>
             </button>
             <button class="tool-btn" onclick="deleteSelected()" id="delete-btn" style="color:var(--accent2);display:none">
                 <span class="tool-btn-icon">✕</span> Удалить
@@ -126,8 +150,8 @@
             <button class="tool-btn" onclick="importSpaceJSON()">
                 <span class="tool-btn-icon">📥</span> Импорт JSON
             </button>
-            <button class="tool-btn" onclick="toggleAIPanel()">
-                <span class="tool-btn-icon">🧠</span> AI Помощник
+            <button class="tool-btn" onclick="toggleAIPanel()" data-plan="pro">
+                <span class="tool-btn-icon">AI</span> AI Помощник <span class="plan-badge">PRO</span>
             </button>
         </div>
 
@@ -144,6 +168,14 @@
             <div class="engine-stat-row">
                 <span class="engine-stat-label">ПЛОТНОСТЬ</span>
                 <span class="engine-stat-value" id="stat-density">0%</span>
+            </div>
+            <div class="engine-stat-row">
+                <span class="engine-stat-label">PLAN</span>
+                <span class="engine-stat-value" id="stat-plan">Basic</span>
+            </div>
+            <div class="engine-stat-row">
+                <span class="engine-stat-label">USAGE</span>
+                <span class="engine-stat-value" id="stat-usage">0/0</span>
             </div>
         </div>
     </div>
@@ -208,6 +240,10 @@
                 <input class="editor-input" type="text" id="editor-tags" placeholder="идея, проект, важно">
             </div>
             <div class="editor-field">
+                <label class="editor-label">Тип узла</label>
+                <select class="editor-input" id="editor-type"></select>
+            </div>
+            <div class="editor-field">
                 <label class="editor-label">Цвет</label>
                 <div class="color-swatches" id="color-swatches"></div>
             </div>
@@ -226,16 +262,19 @@
     <div class="settings-sidebar">
         <div class="settings-sidebar-logo">NeuroSpace</div>
         <div class="settings-nav-item active" onclick="setSettingsTab('appearance')">
-            <span>🎨</span> Внешний вид
+            <span>AP</span> Внешний вид
         </div>
         <div class="settings-nav-item" onclick="setSettingsTab('profile')">
-            <span>👤</span> Профиль
+            <span>PR</span> Профиль
         </div>
         <div class="settings-nav-item" onclick="setSettingsTab('data')">
-            <span>💾</span> Данные
+            <span>DA</span> Данные
+        </div>
+        <div class="settings-nav-item" onclick="setSettingsTab('friends')">
+            <span>FR</span> Friends
         </div>
         <div class="settings-nav-item" onclick="setSettingsTab('about')">
-            <span>ℹ️</span> О системе
+            <span>AB</span> О системе
         </div>
         <button class="settings-back-btn" onclick="showPage('hub')">← НАЗАД В ХАБ</button>
     </div>
@@ -253,6 +292,15 @@
 
 <!-- ===== TOAST ===== -->
 <div class="toast" id="toast"></div>
+
+<!-- ===== COMMAND PALETTE ===== -->
+<div class="command-palette" id="command-palette" style="display:none">
+    <div class="command-box">
+        <div class="command-title">Command Palette</div>
+        <input class="command-input" id="command-input" type="text" placeholder="Type a command...">
+        <div class="command-list" id="command-list"></div>
+    </div>
+</div>
 
 <script src="script.js"></script>
 </body>

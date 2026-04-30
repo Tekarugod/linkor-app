@@ -8,6 +8,8 @@ let state = {
   edges: {},
   theme: 'cyber',
   accentColor: '#00f5ff',
+  language: 'uk',
+  subscriptionPlan: 'basic',
   tool: 'select',
   selectedNodeId: null,
   connectSource: null,
@@ -31,8 +33,539 @@ const NODE_COLORS = [
 
 const EMOJIS = ['🧠','⚡','🌐','🔮','💡','🚀','🔬','🎯','🌊','🔥','💎','🌌','📊','🎨'];
 const COLORS = ['#00f5ff','#ff006e','#7b2fff','#00ff88','#ff9500','#ff3366','#00bfff','#ff6b00','#ffe600'];
+const NODE_TYPES = {
+  idea: { label: 'Idea', short: 'ID', color: '#00f5ff' },
+  task: { label: 'Task', short: 'TK', color: '#00ff88' },
+  question: { label: 'Question', short: 'Q', color: '#ffe600' },
+  resource: { label: 'Resource', short: 'RS', color: '#00bfff' },
+  decision: { label: 'Decision', short: 'DC', color: '#ff006e' }
+};
+const SPACE_TEMPLATES = {
+  blank: {
+    name: 'Blank',
+    desc: 'Clean space with no starter nodes.',
+    nodes: [],
+    edges: []
+  },
+  project: {
+    name: 'Project',
+    desc: 'Plan scope, milestones, risks and next actions.',
+    nodes: [
+      { title: 'Project goal', desc: 'What outcome should this space create?', type: 'idea', x: 120, y: 120, colorIdx: 0, tags: 'goal, project' },
+      { title: 'Milestones', desc: 'Main checkpoints and delivery stages.', type: 'task', x: 380, y: 70, colorIdx: 3, tags: 'plan' },
+      { title: 'Risks', desc: 'What could slow this down?', type: 'question', x: 380, y: 220, colorIdx: 5, tags: 'risk' },
+      { title: 'Next action', desc: 'The first concrete step.', type: 'task', x: 650, y: 145, colorIdx: 4, tags: 'next' }
+    ],
+    edges: [[0, 1], [0, 2], [1, 3]]
+  },
+  study: {
+    name: 'Study',
+    desc: 'Structure a topic into concepts, questions and resources.',
+    nodes: [
+      { title: 'Core topic', desc: 'The subject you want to understand.', type: 'idea', x: 120, y: 130, colorIdx: 0, tags: 'study' },
+      { title: 'Key concepts', desc: 'Terms and principles to master.', type: 'resource', x: 390, y: 70, colorIdx: 2, tags: 'concepts' },
+      { title: 'Open questions', desc: 'What is unclear right now?', type: 'question', x: 390, y: 220, colorIdx: 5, tags: 'questions' },
+      { title: 'Practice tasks', desc: 'Exercises or examples to solve.', type: 'task', x: 650, y: 145, colorIdx: 3, tags: 'practice' }
+    ],
+    edges: [[0, 1], [0, 2], [1, 3]]
+  },
+  startup: {
+    name: 'Startup',
+    desc: 'Map customer, problem, offer and validation.',
+    nodes: [
+      { title: 'Customer segment', desc: 'Who has the pain?', type: 'idea', x: 110, y: 110, colorIdx: 0, tags: 'customer' },
+      { title: 'Problem', desc: 'What expensive problem exists?', type: 'question', x: 360, y: 60, colorIdx: 2, tags: 'problem' },
+      { title: 'Offer', desc: 'What promise do we make?', type: 'decision', x: 360, y: 215, colorIdx: 1, tags: 'offer' },
+      { title: 'Validation test', desc: 'Smallest test to run this week.', type: 'task', x: 620, y: 135, colorIdx: 3, tags: 'mvp, test' }
+    ],
+    edges: [[0, 1], [1, 2], [2, 3]]
+  },
+  book: {
+    name: 'Book',
+    desc: 'Organize chapters, themes, references and decisions.',
+    nodes: [
+      { title: 'Thesis', desc: 'The central idea of the book.', type: 'idea', x: 120, y: 130, colorIdx: 0, tags: 'book' },
+      { title: 'Chapters', desc: 'Main structure and sequence.', type: 'resource', x: 390, y: 70, colorIdx: 2, tags: 'chapters' },
+      { title: 'References', desc: 'Sources, quotes and material.', type: 'resource', x: 390, y: 220, colorIdx: 4, tags: 'sources' },
+      { title: 'Editorial decisions', desc: 'Tone, scope and cuts.', type: 'decision', x: 650, y: 145, colorIdx: 1, tags: 'decisions' }
+    ],
+    edges: [[0, 1], [0, 2], [1, 3]]
+  },
+  goals: {
+    name: 'Personal Goals',
+    desc: 'Track outcomes, habits, blockers and review loops.',
+    nodes: [
+      { title: 'North star', desc: 'The larger direction.', type: 'idea', x: 120, y: 130, colorIdx: 0, tags: 'goals' },
+      { title: 'Habits', desc: 'Repeated actions that compound.', type: 'task', x: 390, y: 70, colorIdx: 3, tags: 'habits' },
+      { title: 'Blockers', desc: 'What usually gets in the way?', type: 'question', x: 390, y: 220, colorIdx: 5, tags: 'blockers' },
+      { title: 'Weekly review', desc: 'Check progress and adjust.', type: 'task', x: 650, y: 145, colorIdx: 4, tags: 'review' }
+    ],
+    edges: [[0, 1], [0, 2], [1, 3]]
+  }
+};
+
+const SPACE_TEMPLATE_I18N = {
+  en: {},
+  uk: {
+    blank: { name: 'Порожній', desc: 'Чистий простір без стартових вузлів.', nodes: [] },
+    project: {
+      name: 'Проєкт',
+      desc: 'Сплануй обсяг, етапи, ризики та наступні дії.',
+      nodes: [
+        { title: 'Мета проєкту', desc: 'Який результат має створити цей простір?', tags: 'мета, проєкт' },
+        { title: 'Етапи', desc: 'Головні контрольні точки та стадії доставки.', tags: 'план' },
+        { title: 'Ризики', desc: 'Що може сповільнити рух?', tags: 'ризик' },
+        { title: 'Наступна дія', desc: 'Перший конкретний крок.', tags: 'наступне' }
+      ]
+    },
+    study: {
+      name: 'Навчання',
+      desc: 'Розклади тему на концепти, питання та ресурси.',
+      nodes: [
+        { title: 'Основна тема', desc: 'Предмет, який ти хочеш зрозуміти.', tags: 'навчання' },
+        { title: 'Ключові концепти', desc: 'Терміни та принципи, які потрібно опанувати.', tags: 'концепти' },
+        { title: 'Відкриті питання', desc: 'Що зараз залишається незрозумілим?', tags: 'питання' },
+        { title: 'Практичні задачі', desc: 'Вправи або приклади для розв’язання.', tags: 'практика' }
+      ]
+    },
+    startup: {
+      name: 'Стартап',
+      desc: 'Зістав клієнта, проблему, пропозицію та перевірку.',
+      nodes: [
+        { title: 'Сегмент клієнтів', desc: 'У кого є цей біль?', tags: 'клієнт' },
+        { title: 'Проблема', desc: 'Яка дорога проблема існує?', tags: 'проблема' },
+        { title: 'Пропозиція', desc: 'Яку обіцянку ми даємо?', tags: 'пропозиція' },
+        { title: 'Перевірка гіпотези', desc: 'Найменший тест, який можна провести цього тижня.', tags: 'mvp, тест' }
+      ]
+    },
+    book: {
+      name: 'Книга',
+      desc: 'Організуй розділи, теми, джерела та рішення.',
+      nodes: [
+        { title: 'Теза', desc: 'Центральна ідея книги.', tags: 'книга' },
+        { title: 'Розділи', desc: 'Основна структура та послідовність.', tags: 'розділи' },
+        { title: 'Джерела', desc: 'Матеріали, цитати та посилання.', tags: 'джерела' },
+        { title: 'Редакційні рішення', desc: 'Тон, обсяг і скорочення.', tags: 'рішення' }
+      ]
+    },
+    goals: {
+      name: 'Особисті цілі',
+      desc: 'Відстежуй результати, звички, блокери та цикли перегляду.',
+      nodes: [
+        { title: 'Головний напрям', desc: 'Більший вектор руху.', tags: 'цілі' },
+        { title: 'Звички', desc: 'Повторювані дії, що накопичують ефект.', tags: 'звички' },
+        { title: 'Блокери', desc: 'Що зазвичай заважає?', tags: 'блокери' },
+        { title: 'Тижневий перегляд', desc: 'Перевірити прогрес і скоригувати план.', tags: 'перегляд' }
+      ]
+    }
+  },
+  ru: {
+    blank: { name: 'Пустой', desc: 'Чистое пространство без стартовых узлов.', nodes: [] },
+    project: {
+      name: 'Проект',
+      desc: 'Спланируйте объем, этапы, риски и следующие действия.',
+      nodes: [
+        { title: 'Цель проекта', desc: 'Какой результат должно создать это пространство?', tags: 'цель, проект' },
+        { title: 'Этапы', desc: 'Главные контрольные точки и стадии доставки.', tags: 'план' },
+        { title: 'Риски', desc: 'Что может замедлить движение?', tags: 'риск' },
+        { title: 'Следующее действие', desc: 'Первый конкретный шаг.', tags: 'следующее' }
+      ]
+    },
+    study: {
+      name: 'Обучение',
+      desc: 'Разложите тему на концепты, вопросы и ресурсы.',
+      nodes: [
+        { title: 'Основная тема', desc: 'Предмет, который вы хотите понять.', tags: 'обучение' },
+        { title: 'Ключевые концепты', desc: 'Термины и принципы, которые нужно освоить.', tags: 'концепты' },
+        { title: 'Открытые вопросы', desc: 'Что сейчас остается непонятным?', tags: 'вопросы' },
+        { title: 'Практические задачи', desc: 'Упражнения или примеры для решения.', tags: 'практика' }
+      ]
+    },
+    startup: {
+      name: 'Стартап',
+      desc: 'Сопоставьте клиента, проблему, предложение и проверку.',
+      nodes: [
+        { title: 'Сегмент клиентов', desc: 'У кого есть эта боль?', tags: 'клиент' },
+        { title: 'Проблема', desc: 'Какая дорогая проблема существует?', tags: 'проблема' },
+        { title: 'Предложение', desc: 'Какое обещание мы даем?', tags: 'предложение' },
+        { title: 'Проверка гипотезы', desc: 'Самый маленький тест на эту неделю.', tags: 'mvp, тест' }
+      ]
+    },
+    book: {
+      name: 'Книга',
+      desc: 'Организуйте главы, темы, источники и решения.',
+      nodes: [
+        { title: 'Тезис', desc: 'Центральная идея книги.', tags: 'книга' },
+        { title: 'Главы', desc: 'Основная структура и последовательность.', tags: 'главы' },
+        { title: 'Источники', desc: 'Материалы, цитаты и ссылки.', tags: 'источники' },
+        { title: 'Редакционные решения', desc: 'Тон, объем и сокращения.', tags: 'решения' }
+      ]
+    },
+    goals: {
+      name: 'Личные цели',
+      desc: 'Отслеживайте результаты, привычки, блокеры и циклы обзора.',
+      nodes: [
+        { title: 'Главное направление', desc: 'Больший вектор движения.', tags: 'цели' },
+        { title: 'Привычки', desc: 'Повторяющиеся действия, которые дают накопительный эффект.', tags: 'привычки' },
+        { title: 'Блокеры', desc: 'Что обычно мешает?', tags: 'блокеры' },
+        { title: 'Еженедельный обзор', desc: 'Проверить прогресс и скорректировать план.', tags: 'обзор' }
+      ]
+    }
+  }
+};
+const SUBSCRIPTION_PLANS = {
+  basic: {
+    id: 'basic',
+    name: 'Basic',
+    price: '$0',
+    tagline: 'Personal local graph starter',
+    limits: { spaces: 3, nodes: 80, links: 120 },
+    features: ['Local storage', 'Quick Capture', 'Manual JSON export', 'Suggested links preview'],
+    note: 'Best for testing ideas and small personal maps.'
+  },
+  plus: {
+    id: 'plus',
+    name: 'Plus',
+    price: '$3.99/mo',
+    tagline: 'Cheap plan for active note builders',
+    limits: { spaces: 25, nodes: 2000, links: 5000 },
+    features: ['More spaces and nodes', 'Advanced hub stats', 'Theme presets', 'Backup reminders', 'Friends waitlist access'],
+    note: 'Enough for students, solo projects and a serious second brain.'
+  },
+  pro: {
+    id: 'pro',
+    name: 'Pro',
+    price: '$9.99/mo',
+    tagline: 'Large knowledge systems and future collaboration',
+    limits: { spaces: null, nodes: null, links: null },
+    features: ['High graph limits', 'Priority AI analysis', 'Version history concept', 'Shared spaces when Friends opens', 'Export packs'],
+    note: 'For heavy research, product work and multi-project knowledge bases.'
+  }
+};
+
+const PLAN_I18N = {
+  en: {},
+  uk: {
+    basic: {
+      tagline: 'Стартовий локальний граф для себе',
+      features: ['Локальне збереження', 'Швидке додавання', 'Ручний JSON-експорт', 'Прев’ю запропонованих зв’язків'],
+      note: 'Найкраще для тестування ідей і невеликих особистих мап.'
+    },
+    plus: {
+      tagline: 'Доступний план для активних нотаток',
+      features: ['Більше просторів і вузлів', 'Розширена статистика хабу', 'Пресети тем', 'Нагадування про бекапи', 'Доступ до черги друзів'],
+      note: 'Достатньо для навчання, сольних проєктів і серйозної другої пам’яті.'
+    },
+    pro: {
+      tagline: 'Великі системи знань і майбутня співпраця',
+      features: ['Високі ліміти графа', 'Пріоритетний AI-аналіз', 'Концепт історії версій', 'Спільні простори після відкриття друзів', 'Пакети експорту'],
+      note: 'Для глибоких досліджень, продуктової роботи та багатопроєктних баз знань.'
+    }
+  },
+  ru: {
+    basic: {
+      tagline: 'Стартовый локальный граф для себя',
+      features: ['Локальное хранение', 'Быстрое добавление', 'Ручной JSON-экспорт', 'Превью предложенных связей'],
+      note: 'Лучше всего для проверки идей и небольших личных карт.'
+    },
+    plus: {
+      tagline: 'Недорогой план для активных заметок',
+      features: ['Больше пространств и узлов', 'Расширенная статистика хаба', 'Пресеты тем', 'Напоминания о бэкапах', 'Доступ к очереди друзей'],
+      note: 'Достаточно для учебы, сольных проектов и серьезной второй памяти.'
+    },
+    pro: {
+      tagline: 'Большие системы знаний и будущая совместная работа',
+      features: ['Высокие лимиты графа', 'Приоритетный AI-анализ', 'Концепт истории версий', 'Общие пространства после открытия друзей', 'Пакеты экспорта'],
+      note: 'Для глубоких исследований, продуктовой работы и многопроектных баз знаний.'
+    }
+  }
+};
+
+const DEMO_I18N = {
+  en: {
+    spaceName: 'My first project',
+    nodes: [
+      { title: 'Main idea', desc: 'Central concept of the project', tags: 'project, idea' },
+      { title: 'Direction A', desc: 'First direction of development', tags: 'development' },
+      { title: 'Direction B', desc: 'Second direction of development', tags: 'development' },
+      { title: 'Concrete step', desc: 'What should be done first', tags: 'task, urgent' }
+    ]
+  },
+  uk: {
+    spaceName: 'Мій перший проєкт',
+    nodes: [
+      { title: 'Головна ідея', desc: 'Центральна концепція проєкту', tags: 'проєкт, ідея' },
+      { title: 'Напрям A', desc: 'Перший напрям розвитку', tags: 'розвиток' },
+      { title: 'Напрям B', desc: 'Другий напрям розвитку', tags: 'розвиток' },
+      { title: 'Конкретний крок', desc: 'Що потрібно зробити насамперед', tags: 'задача, терміново' }
+    ]
+  },
+  ru: {
+    spaceName: 'Мой первый проект',
+    nodes: [
+      { title: 'Главная идея', desc: 'Центральная концепция проекта', tags: 'проект, идея' },
+      { title: 'Направление A', desc: 'Первое направление развития', tags: 'развитие' },
+      { title: 'Направление B', desc: 'Второе направление развития', tags: 'развитие' },
+      { title: 'Конкретный шаг', desc: 'Что нужно сделать в первую очередь', tags: 'задача, срочно' }
+    ]
+  }
+};
 let newSpaceEmoji = '🧠';
 let newSpaceColor = '#00f5ff';
+let newSpaceTemplate = 'blank';
+
+const I18N = {
+  en: {
+    login: 'Login', register: 'Register', identifier: 'Identifier', accessCode: 'Access code',
+    nickname: 'Nickname', accessMin: 'minimum 6 characters', enterSystem: 'ENTER SYSTEM',
+    createAccount: 'CREATE ACCOUNT', logout: 'LOG OUT', plans: 'Plans', friends: 'Friends',
+    export: 'Export', settings: 'Settings', commandCenter: 'Command Center', mySpaces: 'My Spaces',
+    newSpace: 'New Space', searchSpaces: 'Search spaces...', findFriends: 'Find Friends',
+    locked: 'Locked', space: 'Space', searchNodes: 'Search nodes...', quickCapture: 'Quick Capture',
+    quickPlaceholder: 'One thought per line...', capture: '+ CAPTURE', suggestedLinks: 'Suggested Links',
+    suggestEmpty: 'Select a node to see smart link ideas', tools: 'Tools', actions: 'Actions',
+    stats: 'Statistics', select: 'Select', addNode: 'Add node', connect: 'Connect',
+    duplicate: 'Duplicate', focusNode: 'Focus node', autoLayout: 'Auto layout', fitView: 'Fit view',
+    isolated: 'Find isolated', smartLinks: 'Smart Links', delete: 'Delete', exportJson: 'Export JSON',
+    importJson: 'Import JSON', aiAssistant: 'AI Assistant', nodes: 'Nodes', links: 'Links',
+    density: 'Density', plan: 'Plan', usage: 'Usage', connectionMode: 'CONNECT MODE - choose target node',
+    analyzingNodes: 'Analyzing nodes...', aiPrompt: 'Open the AI assistant from the sidebar to analyze this graph.',
+    nodeEditor: 'Node Editor', title: 'Title', titlePlaceholder: 'Thought name...', description: 'Description',
+    descPlaceholder: 'Detailed description...', tags: 'Tags (comma separated)', tagsPlaceholder: 'idea, project, important',
+    nodeType: 'Node type', color: 'Color', connectedNodes: 'Connected nodes', save: 'SAVE', close: 'CLOSE',
+    appearance: 'Appearance', profile: 'Profile', data: 'Data', about: 'About', backHub: 'BACK TO HUB',
+    commandPalette: 'Command Palette', commandPlaceholder: 'Type a command...', language: 'Language',
+    languageSub: 'Choose the interface language', english: 'English', ukrainian: 'Ukrainian', russian: 'Russian',
+    theme: 'Theme', accentColor: 'Accent color', interfaceControl: 'Interface control deck',
+    cleanHubTitle: 'Clean command center', cleanHubCopy: 'Spaces use monograms, density bars and compact status labels instead of emoji-heavy cards.',
+    suggestionsTitle: 'Context suggestions', suggestionsCopy: 'Selected nodes suggest nearby or semantically similar links from your local graph.',
+    profileTitle: 'User Profile', identitySub: 'Identity and workspace signature', dataTitle: 'Data Management',
+    dataSub: 'Local storage, backups and portability', exportBackup: 'Export full backup', importBackup: 'Import backup',
+    storageNote: 'Storage: localStorage. Data stays in this browser until you export or clear it.',
+    backupTitle: 'Portable memory file', backupCopy: 'Export users, spaces, nodes, links, theme and accent as one JSON file.',
+    restoreTitle: 'Manual restore point', restoreCopy: 'Use Git for code checkpoints and JSON backups for your graph content.',
+    friendsTitle: 'Friends Search', friendsSub: 'Closed social layer preview',
+    friendsLockedTitle: 'Collaborator discovery is staged for later',
+    friendsLockedCopy: 'This future section can search people by shared tags, graph overlap, public spaces and invite links. For now it is visible as a product direction, not an active network feature.',
+    aboutSub: 'Digital memory expander v2.1', aboutCopy: 'Created for visualizing and connecting ideas. All data is stored locally in your browser.',
+    local: 'Local', openGraph: 'Open graph', managePlan: 'Manage plan', startClean: 'Start a clean knowledge graph',
+    template: 'Template', visualTone: 'Visual tone', create: 'Create', cancel: 'Cancel',
+    currentPlan: 'Current plan', selectPreview: 'Select preview', nodesUsed: 'nodes used', spaces: 'spaces',
+    prototypeBilling: 'Prototype billing only: selecting a plan changes local limits and UI state. No payment is made.',
+    lockedModule: 'Locked module', friendsModalTitle: 'Find people by shared ideas',
+    friendsModalCopy: 'This section is reserved for profiles, shared spaces, invitations and collaborator discovery. The button is live, but the social layer is intentionally closed for now.',
+    openSettings: 'Open Settings', noCommands: 'No matching commands', noSuggestions: 'No strong suggestions yet',
+    linkButton: 'Link', edit: 'EDIT', subnode: '+SUB', addLink: '+LINK', del: 'DEL',
+    spaceCreated: 'Space created', enterName: 'Enter a name', deleteSpaceConfirm: 'Delete this space and all its nodes?',
+    spaceDeleted: 'Space deleted', profileSaved: 'Profile saved', themeChanged: 'Theme changed',
+    accentChanged: 'Accent color changed', languageChanged: 'Language changed', backupSaved: 'Full backup saved',
+    imported: 'Data imported', fileError: 'File error', replaceData: 'Replace all data? Current data will be lost.',
+    aiLoading: 'Analyzing graph...', aiNoNodes: 'No nodes to analyze.', smartDone: 'Done',
+    smartStopped: 'Smart Links stopped', linkLimit: 'Plan link limit reached', duplicated: 'Node duplicated',
+    requires: 'requires', limitReached: 'limit reached', downloaded: 'Code is downloading...',
+    welcomeBack: 'Welcome back', accountCreated: 'Account created. Welcome', fillFields: 'Fill in all fields',
+    wrongLogin: 'Wrong identifier or access code', userExists: 'A user with this email already exists',
+    typeIdea: 'Idea', typeTask: 'Task', typeQuestion: 'Question', typeResource: 'Resource', typeDecision: 'Decision',
+    profileModalTitle: 'Profile', profileSpaces: 'Spaces', profileNodes: 'Nodes',
+    matchByTags: 'Match by tags', inviteToSpaces: 'Invite to spaces', sharedGraphRooms: 'Shared graph rooms',
+    hubMode: 'Hub mode', graphMemory: 'Graph memory', backup: 'Backup', safety: 'Safety',
+    match: 'Match', invite: 'Invite', sync: 'Sync',
+    similarInterestsTags: 'Similar interests and tags', sharedGraphSpaces: 'Shared graph spaces',
+    optionalProfileDiscovery: 'Optional profile discovery',
+    deleteLinkConfirm: 'Delete this link?', aiLocalTitle: 'AI assistant (local)',
+    aiContextReady: 'Graph context is ready for an external AI.', aiContextTitle: 'Knowledge graph', tagsNone: 'none',
+    aiIdea1: 'Group related nodes into a separate cluster to make the map easier to scan.',
+    aiIdea2: 'One important node has few links. Add intermediate tasks or context nodes around it.',
+    aiIdea3: 'The graph is forming several directions. Consider turning mature clusters into separate spaces.',
+    aiIdea4: 'Add priority tags to urgent nodes so filtering and search stay useful.'
+  },
+  uk: {
+    login: 'Вхід', register: 'Реєстрація', identifier: 'Ідентифікатор', accessCode: 'Код доступу',
+    nickname: 'Нікнейм', accessMin: 'мінімум 6 символів', enterSystem: 'УВІЙТИ В СИСТЕМУ',
+    createAccount: 'СТВОРИТИ АКАУНТ', logout: 'ВИЙТИ', plans: 'Підписки', friends: 'Друзі',
+    export: 'Експорт', settings: 'Налаштування', commandCenter: 'Центр керування', mySpaces: 'Мої Простори',
+    newSpace: 'Новий простір', searchSpaces: 'Пошук просторів...', findFriends: 'Пошук друзів',
+    locked: 'Закрито', space: 'Простір', searchNodes: 'Пошук вузлів...', quickCapture: 'Швидке додавання',
+    quickPlaceholder: 'Одна думка на рядок...', capture: '+ ДОДАТИ', suggestedLinks: 'Запропоновані зв’язки',
+    suggestEmpty: 'Вибери вузол, щоб побачити ідеї для зв’язків', tools: 'Інструменти', actions: 'Дії',
+    stats: 'Статистика', select: 'Вибір', addNode: 'Додати вузол', connect: 'Зв’язок',
+    duplicate: 'Дублювати', focusNode: 'Фокус на вузлі', autoLayout: 'Авто-розміщення', fitView: 'Центрувати',
+    isolated: 'Знайти одиночні', smartLinks: 'Розумні зв’язки', delete: 'Видалити', exportJson: 'Експорт JSON',
+    importJson: 'Імпорт JSON', aiAssistant: 'AI Помічник', nodes: 'Вузли', links: 'Зв’язки',
+    density: 'Щільність', plan: 'План', usage: 'Використано', connectionMode: 'РЕЖИМ ЗВ’ЯЗКУ - вибери цільовий вузол',
+    analyzingNodes: 'Аналіз вузлів...', aiPrompt: 'Відкрий AI помічника з бічної панелі, щоб проаналізувати граф.',
+    nodeEditor: 'Редактор вузла', title: 'Заголовок', titlePlaceholder: 'Назва думки...', description: 'Опис',
+    descPlaceholder: 'Детальний опис...', tags: 'Теги (через кому)', tagsPlaceholder: 'ідея, проєкт, важливо',
+    nodeType: 'Тип вузла', color: 'Колір', connectedNodes: 'Пов’язані вузли', save: 'ЗБЕРЕГТИ', close: 'ЗАКРИТИ',
+    appearance: 'Вигляд', profile: 'Профіль', data: 'Дані', about: 'Про систему', backHub: 'НАЗАД У ХАБ',
+    commandPalette: 'Палітра команд', commandPlaceholder: 'Введи команду...', language: 'Мова',
+    languageSub: 'Вибери мову інтерфейсу', english: 'Англійська', ukrainian: 'Українська', russian: 'Російська',
+    theme: 'Тема', accentColor: 'Акцентний колір', interfaceControl: 'Панель керування інтерфейсом',
+    cleanHubTitle: 'Чистий центр керування', cleanHubCopy: 'Простори використовують монограми, шкали щільності й компактні статуси замість перевантажених карток.',
+    suggestionsTitle: 'Контекстні підказки', suggestionsCopy: 'Вибрані вузли пропонують близькі або семантично схожі зв’язки з локального графа.',
+    profileTitle: 'Профіль користувача', identitySub: 'Ідентичність і підпис робочого простору',
+    dataTitle: 'Керування даними', dataSub: 'Локальне сховище, бекапи й переносимість',
+    exportBackup: 'Експортувати повний бекап', importBackup: 'Імпортувати бекап',
+    storageNote: 'Сховище: localStorage. Дані залишаються в цьому браузері, поки ти їх не експортуєш або не очистиш.',
+    backupTitle: 'Портативний файл пам’яті', backupCopy: 'Експортуй користувачів, простори, вузли, зв’язки, тему й акцент одним JSON файлом.',
+    restoreTitle: 'Ручна точка відновлення', restoreCopy: 'Використовуй Git для коду і JSON-бекапи для вмісту графа.',
+    friendsTitle: 'Пошук друзів', friendsSub: 'Прев’ю закритого соціального шару',
+    friendsLockedTitle: 'Пошук колабораторів запланований на пізніше',
+    friendsLockedCopy: 'У майбутньому цей розділ шукатиме людей за спільними тегами, перетином графів, публічними просторами та інвайтами. Поки це видимий напрям продукту, а не активна мережа.',
+    aboutSub: 'Розширювач цифрової пам’яті v2.1',
+    aboutCopy: 'Створено для візуалізації та зв’язування ідей. Усі дані зберігаються локально у твоєму браузері.',
+    local: 'Локально', openGraph: 'Відкрити граф', managePlan: 'Керувати планом',
+    startClean: 'Почати чистий граф знань', template: 'Шаблон', visualTone: 'Візуальний тон',
+    create: 'Створити', cancel: 'Скасувати', currentPlan: 'Поточний план', selectPreview: 'Обрати прев’ю',
+    nodesUsed: 'вузлів використано', spaces: 'простори',
+    prototypeBilling: 'Це прототип підписок: вибір плану змінює локальні ліміти та стан інтерфейсу. Оплата не виконується.',
+    lockedModule: 'Закритий модуль', friendsModalTitle: 'Знаходь людей за спільними ідеями',
+    friendsModalCopy: 'Цей розділ зарезервований для профілів, спільних просторів, запрошень і пошуку колабораторів. Кнопка працює, але соціальний шар поки закритий.',
+    openSettings: 'Відкрити налаштування', noCommands: 'Немає схожих команд', noSuggestions: 'Поки немає сильних підказок',
+    linkButton: 'Зв’язати', edit: 'РЕД.', subnode: '+ПІД', addLink: '+ЗВ’ЯЗОК', del: 'ВИД.',
+    spaceCreated: 'Простір створено', enterName: 'Введи назву', deleteSpaceConfirm: 'Видалити цей простір і всі його вузли?',
+    spaceDeleted: 'Простір видалено', profileSaved: 'Профіль збережено', themeChanged: 'Тему змінено',
+    accentChanged: 'Акцентний колір змінено', languageChanged: 'Мову змінено', backupSaved: 'Повний бекап збережено',
+    imported: 'Дані імпортовано', fileError: 'Помилка файлу', replaceData: 'Замінити всі дані? Поточні дані буде втрачено.',
+    aiLoading: 'Аналіз графа...', aiNoNodes: 'Немає вузлів для аналізу.', smartDone: 'Готово',
+    smartStopped: 'Розумні зв’язки зупинено', linkLimit: 'Досягнуто ліміт зв’язків плану',
+    duplicated: 'Вузол дубльовано', requires: 'потребує', limitReached: 'ліміт досягнуто',
+    downloaded: 'Код завантажується...', welcomeBack: 'З поверненням', accountCreated: 'Акаунт створено. Вітаю',
+    fillFields: 'Заповни всі поля', wrongLogin: 'Неправильний ідентифікатор або код доступу',
+    userExists: 'Користувач з таким email вже існує',
+    typeIdea: 'Ідея', typeTask: 'Задача', typeQuestion: 'Питання', typeResource: 'Ресурс', typeDecision: 'Рішення',
+    profileModalTitle: 'Профіль', profileSpaces: 'Простори', profileNodes: 'Вузли',
+    matchByTags: 'Збіг за тегами', inviteToSpaces: 'Запрошення у простори', sharedGraphRooms: 'Спільні кімнати графів',
+    hubMode: 'Режим хабу', graphMemory: 'Пам’ять графа', backup: 'Бекап', safety: 'Безпека',
+    match: 'Збіг', invite: 'Інвайт', sync: 'Синхронізація',
+    similarInterestsTags: 'Схожі інтереси й теги', sharedGraphSpaces: 'Спільні простори графів',
+    optionalProfileDiscovery: 'Опційний пошук профілю',
+    deleteLinkConfirm: 'Видалити цей зв’язок?', aiLocalTitle: 'AI-помічник (локальний)',
+    aiContextReady: 'Контекст графа готовий для зовнішнього AI.', aiContextTitle: 'Граф знань', tagsNone: 'немає',
+    aiIdea1: 'Згрупуй пов’язані вузли в окремий кластер, щоб мапу було легше читати.',
+    aiIdea2: 'Один важливий вузол має мало зв’язків. Додай навколо нього проміжні задачі або контекстні вузли.',
+    aiIdea3: 'Граф формує кілька напрямів. Зрілі кластери можна винести в окремі простори.',
+    aiIdea4: 'Додай теги пріоритету до термінових вузлів, щоб фільтрація й пошук лишалися корисними.'
+  },
+  ru: {}
+};
+
+I18N.ru = {
+  ...I18N.uk,
+  login: 'Вход', register: 'Регистрация', identifier: 'Идентификатор', accessCode: 'Код доступа',
+  nickname: 'Никнейм', accessMin: 'минимум 6 символов', enterSystem: 'ВОЙТИ В СИСТЕМУ',
+  createAccount: 'СОЗДАТЬ АККАУНТ', logout: 'ВЫЙТИ', plans: 'Подписки', friends: 'Друзья',
+  export: 'Экспорт', settings: 'Настройки', commandCenter: 'Центр управления', mySpaces: 'Мои Пространства',
+  newSpace: 'Новое пространство', searchSpaces: 'Поиск пространств...', findFriends: 'Поиск друзей',
+  locked: 'Закрыто', space: 'Пространство', searchNodes: 'Поиск узлов...', quickCapture: 'Быстрое добавление',
+  quickPlaceholder: 'Одна мысль на строку...', capture: '+ ДОБАВИТЬ', suggestedLinks: 'Предложенные связи',
+  suggestEmpty: 'Выберите узел, чтобы увидеть идеи связей', tools: 'Инструменты', actions: 'Действия',
+  stats: 'Статистика', select: 'Выбор', addNode: 'Добавить узел', connect: 'Связь',
+  duplicate: 'Дублировать', focusNode: 'Фокус на узле', autoLayout: 'Авто-размещение', fitView: 'Центрировать',
+  isolated: 'Найти одиночные', smartLinks: 'Умные связи', delete: 'Удалить', aiAssistant: 'AI Помощник',
+  nodes: 'Узлы', links: 'Связи', density: 'Плотность', usage: 'Использовано',
+  connectionMode: 'РЕЖИМ СВЯЗИ - выберите целевой узел', analyzingNodes: 'Анализ узлов...',
+  aiPrompt: 'Откройте AI помощника из боковой панели, чтобы проанализировать граф.',
+  nodeEditor: 'Редактор узла', titlePlaceholder: 'Название мысли...', description: 'Описание',
+  descPlaceholder: 'Подробное описание...', tags: 'Теги (через запятую)', tagsPlaceholder: 'идея, проект, важно',
+  nodeType: 'Тип узла', color: 'Цвет', connectedNodes: 'Связанные узлы', save: 'СОХРАНИТЬ', close: 'ЗАКРЫТЬ',
+  appearance: 'Внешний вид', profile: 'Профиль', data: 'Данные', about: 'О системе', backHub: 'НАЗАД В ХАБ',
+  commandPalette: 'Палитра команд', commandPlaceholder: 'Введите команду...', language: 'Язык',
+  languageSub: 'Выберите язык интерфейса', english: 'Английский', ukrainian: 'Украинский', russian: 'Русский',
+  theme: 'Тема', accentColor: 'Акцентный цвет', interfaceControl: 'Панель управления интерфейсом',
+  cleanHubTitle: 'Чистый центр управления',
+  cleanHubCopy: 'Пространства используют монограммы, шкалы плотности и компактные статусы вместо перегруженных карточек.',
+  suggestionsTitle: 'Контекстные подсказки',
+  suggestionsCopy: 'Выбранные узлы предлагают близкие или семантически похожие связи из локального графа.',
+  profileTitle: 'Профиль пользователя', identitySub: 'Идентичность и подпись рабочего пространства',
+  dataTitle: 'Управление данными', dataSub: 'Локальное хранилище, бэкапы и переносимость',
+  exportBackup: 'Экспортировать полный бэкап', importBackup: 'Импортировать бэкап',
+  storageNote: 'Хранилище: localStorage. Данные остаются в этом браузере, пока вы их не экспортируете или не очистите.',
+  friendsTitle: 'Поиск друзей', friendsSub: 'Превью закрытого социального слоя',
+  friendsLockedTitle: 'Поиск коллабораторов запланирован на позже',
+  friendsLockedCopy: 'В будущем этот раздел будет искать людей по общим тегам, пересечению графов, публичным пространствам и инвайтам. Пока это видимое направление продукта, а не активная сеть.',
+  friendsModalCopy: 'Этот раздел зарезервирован для профилей, общих пространств, приглашений и поиска коллабораторов. Кнопка работает, но социальный слой пока закрыт.',
+  backupCopy: 'Экспорт пользователей, пространств, узлов, связей, темы и акцента одним JSON файлом.',
+  restoreCopy: 'Используйте Git для кода и JSON-бэкапы для содержимого графа.',
+  aboutSub: 'Расширитель цифровой памяти v2.1',
+  aboutCopy: 'Создано для визуализации и связывания идей. Все данные хранятся локально в вашем браузере.',
+  local: 'Локально', openGraph: 'Открыть граф', managePlan: 'Управлять планом',
+  startClean: 'Начать чистый граф знаний', template: 'Шаблон', visualTone: 'Визуальный тон',
+  create: 'Создать', cancel: 'Отмена', currentPlan: 'Текущий план', selectPreview: 'Выбрать превью',
+  nodesUsed: 'узлов использовано', spaces: 'пространства',
+  prototypeBilling: 'Это прототип подписок: выбор плана меняет локальные лимиты и состояние интерфейса. Оплата не выполняется.',
+  lockedModule: 'Закрытый модуль', friendsModalTitle: 'Находите людей по общим идеям',
+  openSettings: 'Открыть настройки', noCommands: 'Нет похожих команд', noSuggestions: 'Пока нет сильных подсказок',
+  linkButton: 'Связать', edit: 'РЕД.', subnode: '+ПОД', addLink: '+СВЯЗЬ', del: 'УДАЛ.',
+  spaceCreated: 'Пространство создано', enterName: 'Введите название',
+  deleteSpaceConfirm: 'Удалить это пространство и все его узлы?', spaceDeleted: 'Пространство удалено',
+  profileSaved: 'Профиль сохранен', themeChanged: 'Тема изменена', accentChanged: 'Акцентный цвет изменен',
+  languageChanged: 'Язык изменен', backupSaved: 'Полный бэкап сохранен', imported: 'Данные импортированы',
+  fileError: 'Ошибка файла', replaceData: 'Заменить все данные? Текущие данные будут потеряны.',
+  aiLoading: 'Анализ графа...', aiNoNodes: 'Нет узлов для анализа.', smartStopped: 'Умные связи остановлены',
+  linkLimit: 'Достигнут лимит связей плана', duplicated: 'Узел дублирован', requires: 'требует',
+  limitReached: 'лимит достигнут', downloaded: 'Код загружается...', welcomeBack: 'С возвращением',
+  accountCreated: 'Аккаунт создан. Добро пожаловать', fillFields: 'Заполните все поля',
+  wrongLogin: 'Неверный идентификатор или код доступа', userExists: 'Пользователь с таким email уже существует',
+  typeIdea: 'Идея', typeTask: 'Задача', typeQuestion: 'Вопрос', typeResource: 'Ресурс', typeDecision: 'Решение',
+  profileModalTitle: 'Профиль', profileSpaces: 'Пространства', profileNodes: 'Узлы',
+  matchByTags: 'Совпадение по тегам', inviteToSpaces: 'Приглашение в пространства', sharedGraphRooms: 'Общие комнаты графов',
+  hubMode: 'Режим хаба', graphMemory: 'Память графа', backup: 'Бэкап', safety: 'Безопасность',
+  match: 'Совпадение', invite: 'Инвайт', sync: 'Синхронизация',
+  similarInterestsTags: 'Похожие интересы и теги', sharedGraphSpaces: 'Общие пространства графов',
+  optionalProfileDiscovery: 'Опциональный поиск профиля',
+  deleteLinkConfirm: 'Удалить эту связь?', aiLocalTitle: 'AI-помощник (локальный)',
+  aiContextReady: 'Контекст графа готов для внешнего AI.', aiContextTitle: 'Граф знаний', tagsNone: 'нет',
+  aiIdea1: 'Сгруппируйте связанные узлы в отдельный кластер, чтобы карту было легче читать.',
+  aiIdea2: 'У одного важного узла мало связей. Добавьте вокруг него промежуточные задачи или контекстные узлы.',
+  aiIdea3: 'Граф формирует несколько направлений. Зрелые кластеры можно вынести в отдельные пространства.',
+  aiIdea4: 'Добавьте теги приоритета к срочным узлам, чтобы фильтрация и поиск оставались полезными.'
+};
+
+const TYPE_I18N_KEYS = { idea: 'typeIdea', task: 'typeTask', question: 'typeQuestion', resource: 'typeResource', decision: 'typeDecision' };
+
+function tr(key, vars = {}) {
+  const dict = I18N[state.language] || I18N.uk;
+  let text = dict[key] || I18N.en[key] || key;
+  Object.entries(vars).forEach(([name, value]) => {
+    text = text.replaceAll(`{${name}}`, value);
+  });
+  return text;
+}
+
+function typeLabel(typeId) {
+  return tr(TYPE_I18N_KEYS[typeId] || 'typeIdea');
+}
+
+function currentLang() {
+  return I18N[state.language] ? state.language : 'uk';
+}
+
+function getLocalizedTemplate(templateId) {
+  const base = SPACE_TEMPLATES[templateId] || SPACE_TEMPLATES.blank;
+  const localized = SPACE_TEMPLATE_I18N[currentLang()]?.[templateId] || {};
+  return {
+    ...base,
+    ...localized,
+    nodes: base.nodes.map((node, index) => ({
+      ...node,
+      ...(localized.nodes?.[index] || {})
+    }))
+  };
+}
+
+function getLocalizedPlan(plan) {
+  const localized = PLAN_I18N[currentLang()]?.[plan.id] || {};
+  return {
+    ...plan,
+    ...localized,
+    features: localized.features || plan.features
+  };
+}
+
+function getDemoCopy() {
+  return DEMO_I18N[currentLang()] || DEMO_I18N.uk;
+}
 
 // ===== PERSISTENCE =====
 function loadState() {
@@ -47,6 +580,8 @@ function loadState() {
       state.edges = saved.edges || {};
       state.theme = saved.theme || 'cyber';
       state.accentColor = saved.accentColor || '#00f5ff';
+      state.language = saved.language || 'uk';
+      state.subscriptionPlan = saved.subscriptionPlan || 'basic';
       state.nodeIdCounter = saved.nodeIdCounter || 1;
       state.edgeIdCounter = saved.edgeIdCounter || 1;
       state.spaceIdCounter = saved.spaceIdCounter || 1;
@@ -64,6 +599,8 @@ function saveState() {
       edges: state.edges,
       theme: state.theme,
       accentColor: state.accentColor,
+      language: state.language,
+      subscriptionPlan: state.subscriptionPlan,
       nodeIdCounter: state.nodeIdCounter,
       edgeIdCounter: state.edgeIdCounter,
       spaceIdCounter: state.spaceIdCounter,
@@ -76,12 +613,105 @@ function showPage(id) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   const target = document.getElementById(id);
   if (target) target.classList.add('active');
+  applyStaticTranslations();
   if (id === 'hub') renderHub();
   if (id === 'engine') renderEngine();
   if (id === 'settings') {
     setSettingsTab('appearance');
     renderSettings('appearance');
   }
+}
+
+function setText(selector, value) {
+  const el = document.querySelector(selector);
+  if (el) el.textContent = value;
+}
+
+function setHtml(selector, value) {
+  const el = document.querySelector(selector);
+  if (el) el.innerHTML = value;
+}
+
+function setPlaceholder(selector, value) {
+  const el = document.querySelector(selector);
+  if (el) el.placeholder = value;
+}
+
+function applyStaticTranslations() {
+  document.documentElement.lang = state.language || 'uk';
+  setText('.gate-tabs .gate-tab:nth-child(1)', tr('login'));
+  setText('.gate-tabs .gate-tab:nth-child(2)', tr('register'));
+  setText('#login-form .gate-input-group:nth-child(1) .gate-label', tr('identifier'));
+  setText('#login-form .gate-input-group:nth-child(2) .gate-label', tr('accessCode'));
+  setText('#register-form .gate-input-group:nth-child(1) .gate-label', tr('nickname'));
+  setText('#register-form .gate-input-group:nth-child(3) .gate-label', tr('accessCode'));
+  setPlaceholder('#reg-pass', tr('accessMin'));
+  setText('#login-form .gate-btn span', tr('enterSystem'));
+  setText('#register-form .gate-btn span', tr('createAccount'));
+  setText('.hub-nav-btn.plan', tr('plans'));
+  setText('.hub-nav-btn.locked', tr('friends'));
+  setText('.hub-nav-btn[href="#"]', tr('export'));
+  setText('.hub-nav-btn[onclick*="settings"]', tr('settings'));
+  setText('.hub-logout-btn', tr('logout'));
+  setText('.hub-kicker', tr('commandCenter'));
+  setHtml('.hub-title', `${tr('mySpaces').split(' ')[0] || tr('mySpaces')} <span>${tr('mySpaces').split(' ').slice(1).join(' ') || tr('spaces')}</span>`);
+  setText('.hub-new-btn span', tr('newSpace'));
+  setPlaceholder('#hub-search', tr('searchSpaces'));
+  setHtml('.hub-tool-btn', `${tr('findFriends')} <span>${tr('locked')}</span>`);
+  setText('.engine-space-name', document.getElementById('engine-space-name')?.textContent || tr('space'));
+  setPlaceholder('#node-search', tr('searchNodes'));
+  setText('.quick-capture .engine-sidebar-title', `// ${tr('quickCapture')}`);
+  setPlaceholder('#quick-capture-input', tr('quickPlaceholder'));
+  setText('.quick-capture-btn span', tr('capture'));
+  setText('#connection-suggestions .engine-sidebar-title', `// ${tr('suggestedLinks')}`);
+  const suggestionEmpty = document.querySelector('#connection-suggestions .suggestion-empty');
+  if (suggestionEmpty) suggestionEmpty.textContent = tr('suggestEmpty');
+  const sidebarTitles = document.querySelectorAll('.engine-sidebar-section .engine-sidebar-title, .engine-stats .engine-sidebar-title');
+  if (sidebarTitles[0]) sidebarTitles[0].textContent = `// ${tr('tools')}`;
+  if (sidebarTitles[1]) sidebarTitles[1].textContent = `// ${tr('actions')}`;
+  if (sidebarTitles[2]) sidebarTitles[2].textContent = `// ${tr('stats')}`;
+  setHtml('#tool-select', `<span class="tool-btn-icon">↖</span> ${tr('select')}`);
+  setHtml('#tool-node', `<span class="tool-btn-icon">☐</span> ${tr('addNode')}`);
+  setHtml('#tool-connect', `<span class="tool-btn-icon">⤢</span> ${tr('connect')}`);
+  const buttons = document.querySelectorAll('.engine-sidebar .tool-btn');
+  if (buttons[3]) buttons[3].innerHTML = `<span class="tool-btn-icon">⧉</span> ${tr('duplicate')} <span class="plan-badge">PLUS</span>`;
+  if (buttons[4]) buttons[4].innerHTML = `<span class="tool-btn-icon">⌖</span> ${tr('focusNode')}`;
+  if (buttons[5]) buttons[5].innerHTML = `<span class="tool-btn-icon">⬡</span> ${tr('autoLayout')}`;
+  if (buttons[6]) buttons[6].innerHTML = `<span class="tool-btn-icon">⊡</span> ${tr('fitView')}`;
+  if (buttons[7]) buttons[7].innerHTML = `<span class="tool-btn-icon">◇</span> ${tr('isolated')}`;
+  if (buttons[8]) buttons[8].innerHTML = `<span class="tool-btn-icon">⌁</span> ${tr('smartLinks')} <span class="plan-badge">PLUS</span>`;
+  if (buttons[9]) buttons[9].innerHTML = `<span class="tool-btn-icon">✕</span> ${tr('delete')}`;
+  if (buttons[10]) buttons[10].innerHTML = `<span class="tool-btn-icon">JSON</span> ${tr('exportJson')}`;
+  if (buttons[11]) buttons[11].innerHTML = `<span class="tool-btn-icon">IN</span> ${tr('importJson')}`;
+  if (buttons[12]) buttons[12].innerHTML = `<span class="tool-btn-icon">AI</span> ${tr('aiAssistant')} <span class="plan-badge">PRO</span>`;
+  const statLabels = document.querySelectorAll('.engine-stat-label');
+  [tr('nodes'), tr('links'), tr('density'), tr('plan'), tr('usage')].forEach((label, i) => {
+    if (statLabels[i]) statLabels[i].textContent = label.toUpperCase();
+  });
+  setText('#connect-indicator', tr('connectionMode'));
+  setText('#progress-text', tr('analyzingNodes'));
+  setText('#ai-panel .node-editor-title', `// ${tr('aiAssistant')}`);
+  setText('#ai-panel .editor-close-btn', `× ${tr('close')}`);
+  setText('#node-editor .node-editor-title', `// ${tr('nodeEditor')}`);
+  const editorLabels = document.querySelectorAll('#node-editor .editor-label');
+  [tr('title'), tr('description'), tr('tags'), tr('nodeType'), tr('color'), tr('connectedNodes')].forEach((label, i) => {
+    if (editorLabels[i]) editorLabels[i].textContent = label;
+  });
+  setPlaceholder('#editor-title', tr('titlePlaceholder'));
+  setPlaceholder('#editor-desc', tr('descPlaceholder'));
+  setPlaceholder('#editor-tags', tr('tagsPlaceholder'));
+  setText('#node-editor .editor-save-btn span', tr('save'));
+  setText('#node-editor .editor-close-btn', `× ${tr('close')}`);
+  const settingsItems = document.querySelectorAll('.settings-nav-item');
+  if (settingsItems[0]) settingsItems[0].innerHTML = `<span>AP</span> ${tr('appearance')}`;
+  if (settingsItems[1]) settingsItems[1].innerHTML = `<span>PR</span> ${tr('profile')}`;
+  if (settingsItems[2]) settingsItems[2].innerHTML = `<span>DA</span> ${tr('data')}`;
+  if (settingsItems[3]) settingsItems[3].innerHTML = `<span>FR</span> ${tr('friends')}`;
+  if (settingsItems[4]) settingsItems[4].innerHTML = `<span>AB</span> ${tr('about')}`;
+  setText('.settings-back-btn', `← ${tr('backHub')}`);
+  setText('.command-title', tr('commandPalette'));
+  setPlaceholder('#command-input', tr('commandPlaceholder'));
+  updatePlanBadges();
 }
 
 // ===== AUTH =====
@@ -99,13 +729,13 @@ function doLogin() {
   const email = document.getElementById('login-email').value.trim();
   const pass = document.getElementById('login-pass').value;
   const errEl = document.getElementById('login-error');
-  if (!email || !pass) { errEl.textContent = '⚠ Введите идентификатор и код доступа'; return; }
+  if (!email || !pass) { errEl.textContent = `⚠ ${tr('fillFields')}`; return; }
   const user = state.users[email];
-  if (!user || user.pass !== pass) { errEl.textContent = '⚠ Неверный идентификатор или код доступа'; return; }
+  if (!user || user.pass !== pass) { errEl.textContent = `⚠ ${tr('wrongLogin')}`; return; }
   state.currentUser = email;
   saveState();
   showPage('hub');
-  showToast('✓ С возвращением, ' + user.nick);
+  showToast(`✓ ${tr('welcomeBack')}, ${user.nick}`);
 }
 
 function doRegister() {
@@ -113,8 +743,8 @@ function doRegister() {
   const email = document.getElementById('reg-email').value.trim() || (nick + '@neurospace.io');
   const pass = document.getElementById('reg-pass').value;
   const errEl = document.getElementById('reg-error');
-  if (!nick || !pass) { errEl.textContent = '⚠ Заполните все поля'; return; }
-  if (state.users[email]) { errEl.textContent = '⚠ Пользователь с таким email уже существует'; return; }
+  if (!nick || !pass) { errEl.textContent = `⚠ ${tr('fillFields')}`; return; }
+  if (state.users[email]) { errEl.textContent = `⚠ ${tr('userExists')}`; return; }
   state.users[email] = { nick, pass, createdAt: Date.now() };
   state.currentUser = email;
   if (state.spaces.length === 0) {
@@ -122,7 +752,7 @@ function doRegister() {
   }
   saveState();
   showPage('hub');
-  showToast('⚡ Аккаунт создан! Добро пожаловать, ' + nick);
+  showToast(`✓ ${tr('accountCreated')}, ${nick}`);
 }
 
 function doLogout() {
@@ -135,11 +765,12 @@ function doLogout() {
 
 function createDemoData() {
   const spaceId = 'sp_demo1';
-  state.spaces.push({ id: spaceId, name: 'Мой первый проект', icon: '🧠', color: '#00f5ff' });
-  state.nodes['n_d1'] = { id: 'n_d1', spaceId, x: 100, y: 100, title: 'Главная идея', desc: 'Центральная концепция проекта', tags: 'проект, идея', colorIdx: 0 };
-  state.nodes['n_d2'] = { id: 'n_d2', spaceId, x: 350, y: 50, title: 'Направление A', desc: 'Первое направление развития', tags: 'развитие', colorIdx: 2 };
-  state.nodes['n_d3'] = { id: 'n_d3', spaceId, x: 350, y: 200, title: 'Направление B', desc: 'Второе направление развития', tags: 'развитие', colorIdx: 1 };
-  state.nodes['n_d4'] = { id: 'n_d4', spaceId, x: 600, y: 120, title: 'Конкретный шаг', desc: 'Что нужно сделать в первую очередь', tags: 'задача, срочно', colorIdx: 3 };
+  const demo = getDemoCopy();
+  state.spaces.push({ id: spaceId, name: demo.spaceName, icon: '🧠', color: '#00f5ff' });
+  state.nodes['n_d1'] = { id: 'n_d1', spaceId, x: 100, y: 100, ...demo.nodes[0], colorIdx: 0, type: 'idea' };
+  state.nodes['n_d2'] = { id: 'n_d2', spaceId, x: 350, y: 50, ...demo.nodes[1], colorIdx: 2, type: 'idea' };
+  state.nodes['n_d3'] = { id: 'n_d3', spaceId, x: 350, y: 200, ...demo.nodes[2], colorIdx: 1, type: 'idea' };
+  state.nodes['n_d4'] = { id: 'n_d4', spaceId, x: 600, y: 120, ...demo.nodes[3], colorIdx: 3, type: 'task' };
   state.edges['e_d1'] = { id: 'e_d1', spaceId, from: 'n_d1', to: 'n_d2' };
   state.edges['e_d2'] = { id: 'e_d2', spaceId, from: 'n_d1', to: 'n_d3' };
   state.edges['e_d3'] = { id: 'e_d3', spaceId, from: 'n_d2', to: 'n_d4' };
@@ -149,26 +780,105 @@ function createDemoData() {
 }
 
 // ===== HUB =====
+function getSpaceStats(spaceId) {
+  const nodeCount = Object.values(state.nodes).filter(n => n.spaceId === spaceId).length;
+  const edgeCount = Object.values(state.edges).filter(e => e.spaceId === spaceId).length;
+  const maxEdges = nodeCount * (nodeCount - 1) / 2;
+  const density = maxEdges > 0 ? Math.round((edgeCount / maxEdges) * 100) : 0;
+  return { nodeCount, edgeCount, density };
+}
+
+function getHubMetrics() {
+  const totalNodes = Object.values(state.nodes).filter(n => state.spaces.some(s => s.id === n.spaceId)).length;
+  const totalEdges = Object.values(state.edges).filter(e => state.spaces.some(s => s.id === e.spaceId)).length;
+  const activeSpaces = state.spaces.length;
+  const avgDensity = activeSpaces
+    ? Math.round(state.spaces.reduce((sum, space) => sum + getSpaceStats(space.id).density, 0) / activeSpaces)
+    : 0;
+  return { activeSpaces, totalNodes, totalEdges, avgDensity };
+}
+
+function getActivePlan() {
+  return SUBSCRIPTION_PLANS[state.subscriptionPlan] || SUBSCRIPTION_PLANS.basic;
+}
+
+function getPlanLevel(planId) {
+  return { basic: 0, plus: 1, pro: 2 }[planId] ?? 0;
+}
+
+function planAllows(requiredPlan) {
+  return getPlanLevel(state.subscriptionPlan) >= getPlanLevel(requiredPlan);
+}
+
+function requirePlan(requiredPlan, featureName) {
+  if (planAllows(requiredPlan)) return true;
+  showToast(`${featureName} ${tr('requires')} ${requiredPlan.toUpperCase()}`);
+  openSubscriptionModal();
+  return false;
+}
+
+function formatPlanLimit(value) {
+  return value ? value.toLocaleString() : (state.language === 'en' ? 'Unlimited' : state.language === 'ru' ? 'Безлимит' : 'Безліміт');
+}
+
+function planUsagePct(value, limit) {
+  if (!limit) return Math.min(100, Math.round(value / 500));
+  return Math.min(100, Math.round((value / limit) * 100));
+}
+
+function canUsePlanResource(type, nextCount) {
+  const plan = getActivePlan();
+  const limit = plan.limits[type];
+  return !limit || nextCount <= limit;
+}
+
+function showPlanLimit(type) {
+  const plan = getActivePlan();
+  showToast(`${plan.name}: ${tr('limitReached')} (${type})`);
+  openSubscriptionModal();
+}
+
 function renderHub() {
   if (!state.currentUser) return;
   const user = state.users[state.currentUser];
   document.getElementById('hub-username').textContent = user.nick;
   document.getElementById('hub-avatar').textContent = user.nick.substring(0, 2).toUpperCase();
   applyAccentColor();
-  if (state.theme) applyTheme(state.theme);
+  if (state.theme) applyTheme(state.theme, true);
+  const metrics = getHubMetrics();
+  const plan = getActivePlan();
+  const overview = document.getElementById('hub-overview');
+  if (overview) {
+    overview.innerHTML = `
+      <div class="hub-metric"><span>${metrics.activeSpaces}</span><label>${tr('spaces')} / ${formatPlanLimit(plan.limits.spaces)}</label><div class="hub-meter"><i style="width:${planUsagePct(metrics.activeSpaces, plan.limits.spaces)}%"></i></div></div>
+      <div class="hub-metric"><span>${metrics.totalNodes}</span><label>${tr('nodes')} / ${formatPlanLimit(plan.limits.nodes)}</label><div class="hub-meter"><i style="width:${planUsagePct(metrics.totalNodes, plan.limits.nodes)}%"></i></div></div>
+      <div class="hub-metric"><span>${metrics.totalEdges}</span><label>${tr('links')} / ${formatPlanLimit(plan.limits.links)}</label><div class="hub-meter"><i style="width:${planUsagePct(metrics.totalEdges, plan.limits.links)}%"></i></div></div>
+      <div class="hub-metric plan-metric"><span>${plan.name}</span><label>${plan.price}</label><button onclick="event.stopPropagation();openSubscriptionModal()">${tr('managePlan')}</button></div>
+    `;
+  }
+  const query = document.getElementById('hub-search')?.value.trim().toLowerCase() || '';
   const grid = document.getElementById('spaces-grid');
   grid.innerHTML = '';
-  state.spaces.forEach(space => {
-    const nodeCount = Object.values(state.nodes).filter(n => n.spaceId === space.id).length;
-    const edgeCount = Object.values(state.edges).filter(e => e.spaceId === space.id).length;
+  const spaces = state.spaces.filter(space => space.name.toLowerCase().includes(query));
+  spaces.forEach(space => {
+    const { nodeCount, edgeCount, density } = getSpaceStats(space.id);
     const card = document.createElement('div');
     card.className = 'space-card';
-    card.style.animationDelay = (state.spaces.indexOf(space) * 0.05) + 's';
+    card.style.animationDelay = (spaces.indexOf(space) * 0.05) + 's';
+    const initials = (space.name || 'NS').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
     card.innerHTML = `
       <div class="space-card-accent" style="background:linear-gradient(90deg,${space.color || 'var(--accent)'},transparent)"></div>
-      <div class="space-card-icon">${space.icon || '🧠'}</div>
+      <div class="space-card-head">
+        <div class="space-card-mark" style="border-color:${space.color || 'var(--accent)'}">${escHtml(initials)}</div>
+        <div class="space-card-status">${tr('local')}</div>
+      </div>
       <div class="space-card-name">${escHtml(space.name)}</div>
-      <div class="space-card-meta">Узлов: ${nodeCount} | Связей: ${edgeCount}</div>
+      <div class="space-card-meta">${nodeCount} ${tr('nodes').toLowerCase()} / ${edgeCount} ${tr('links').toLowerCase()}</div>
+      <div class="space-card-progress"><span style="width:${Math.min(100, density)}%;background:${space.color || 'var(--accent)'}"></span></div>
+      <div class="space-card-footer">
+        <span>${tr('density')} ${density}%</span>
+        <span>${tr('openGraph')}</span>
+      </div>
       <button class="space-card-del" onclick="deleteSpace(event,'${space.id}')">✕</button>
     `;
     card.onclick = () => openSpace(space.id);
@@ -176,20 +886,20 @@ function renderHub() {
   });
   const newCard = document.createElement('div');
   newCard.className = 'space-card space-card-new';
-  newCard.innerHTML = `<div class="space-card-new-icon">＋</div><div class="space-card-new-label">Новое пространство</div>`;
+  newCard.innerHTML = `<div class="space-card-new-icon"></div><div class="space-card-new-label">${tr('newSpace')}</div><div class="space-card-new-sub">${tr('startClean')}</div>`;
   newCard.onclick = () => openNewSpaceModal();
   grid.appendChild(newCard);
 }
 
 function deleteSpace(e, id) {
   e.stopPropagation();
-  if (!confirm('Удалить пространство и все его узлы?')) return;
+  if (!confirm(tr('deleteSpaceConfirm'))) return;
   state.spaces = state.spaces.filter(s => s.id !== id);
   Object.keys(state.nodes).forEach(k => { if (state.nodes[k].spaceId === id) delete state.nodes[k]; });
   Object.keys(state.edges).forEach(k => { if (state.edges[k].spaceId === id) delete state.edges[k]; });
   saveState();
   renderHub();
-  showToast('🗑 Пространство удалено');
+  showToast(`✓ ${tr('spaceDeleted')}`);
 }
 
 function openSpace(id) {
@@ -208,7 +918,8 @@ function openProfileModal() {
   const totalNodes = Object.values(state.nodes).filter(n => state.spaces.some(s => s.id === n.spaceId)).length;
   const totalEdges = Object.values(state.edges).filter(e => state.spaces.some(s => s.id === e.spaceId)).length;
   const modal = document.getElementById('modal');
-  document.getElementById('modal-title').textContent = '👤 Профиль пользователя';
+  modal.querySelector('.modal-box')?.classList.remove('modal-box-wide');
+  document.getElementById('modal-title').textContent = `// ${tr('profileModalTitle')}`;
   document.getElementById('modal-body').innerHTML = `
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
       <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent3));display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-size:18px;font-weight:700;color:var(--bg)">${user.nick.substring(0,2).toUpperCase()}</div>
@@ -220,40 +931,151 @@ function openProfileModal() {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
       <div style="background:var(--glass);border:1px solid var(--border);padding:12px;text-align:center;border-radius:2px">
         <div style="font-family:'Orbitron',monospace;font-size:20px;color:var(--accent)">${spacesCount}</div>
-        <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text-dim);letter-spacing:1px">ПРОСТРАНСТВ</div>
+        <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text-dim);letter-spacing:1px">${tr('profileSpaces').toUpperCase()}</div>
       </div>
       <div style="background:var(--glass);border:1px solid var(--border);padding:12px;text-align:center;border-radius:2px">
         <div style="font-family:'Orbitron',monospace;font-size:20px;color:var(--accent)">${totalNodes}</div>
-        <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text-dim);letter-spacing:1px">УЗЛОВ</div>
+        <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text-dim);letter-spacing:1px">${tr('profileNodes').toUpperCase()}</div>
       </div>
     </div>
     <div class="modal-actions">
-      <button class="modal-btn modal-btn-primary" onclick="showPage('settings');closeModal()"><span>⚙ НАСТРОЙКИ</span></button>
-      <button class="modal-btn modal-btn-secondary" onclick="closeModal()">ЗАКРЫТЬ</button>
+      <button class="modal-btn modal-btn-primary" onclick="showPage('settings');closeModal()"><span>${tr('settings')}</span></button>
+      <button class="modal-btn modal-btn-secondary" onclick="closeModal()">${tr('close')}</button>
     </div>
   `;
   modal.style.display = 'flex';
 }
 
-// ===== NEW SPACE MODAL =====
-function openNewSpaceModal() {
-  newSpaceEmoji = '🧠';
-  newSpaceColor = '#00f5ff';
+function openFriendsLocked() {
   const modal = document.getElementById('modal');
-  document.getElementById('modal-title').textContent = '// Новое пространство';
+  modal.querySelector('.modal-box')?.classList.remove('modal-box-wide');
+  document.getElementById('modal-title').textContent = `// ${tr('friendsTitle')}`;
   document.getElementById('modal-body').innerHTML = `
-    <input class="modal-input" type="text" id="new-space-name" placeholder="Название пространства..." autofocus>
-    <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text-dim);letter-spacing:2px;margin-bottom:10px;text-transform:uppercase">Иконка</div>
-    <div class="modal-emoji-row">
-      ${EMOJIS.map(e => `<div class="modal-emoji ${e===newSpaceEmoji?'active':''}" onclick="selectEmoji('${e}',this)">${e}</div>`).join('')}
-    </div>
-    <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text-dim);letter-spacing:2px;margin-bottom:10px;text-transform:uppercase">Цвет</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px">
-      ${COLORS.map(c => `<div style="width:28px;height:28px;border-radius:50%;background:${c};cursor:pointer;border:3px solid ${c===newSpaceColor?'white':'transparent'};transition:all 0.2s" onclick="selectSpaceColor('${c}',this)"></div>`).join('')}
+    <div class="locked-panel">
+      <div class="locked-badge">${tr('lockedModule')}</div>
+      <div class="locked-title">${tr('friendsModalTitle')}</div>
+      <div class="locked-copy">${tr('friendsModalCopy')}</div>
+      <div class="locked-preview">
+        <div><span>01</span> ${tr('matchByTags')}</div>
+        <div><span>02</span> ${tr('inviteToSpaces')}</div>
+        <div><span>03</span> ${tr('sharedGraphRooms')}</div>
+      </div>
     </div>
     <div class="modal-actions">
-      <button class="modal-btn modal-btn-primary" onclick="createSpace()"><span>⚡ СОЗДАТЬ</span></button>
-      <button class="modal-btn modal-btn-secondary" onclick="closeModal()">ОТМЕНА</button>
+      <button class="modal-btn modal-btn-primary" onclick="showPage('settings');setSettingsTab('friends');closeModal()"><span>${tr('openSettings')}</span></button>
+      <button class="modal-btn modal-btn-secondary" onclick="closeModal()">${tr('close')}</button>
+    </div>
+  `;
+  modal.style.display = 'flex';
+}
+
+function openSubscriptionModal() {
+  const modal = document.getElementById('modal');
+  modal.querySelector('.modal-box')?.classList.add('modal-box-wide');
+  const metrics = getHubMetrics();
+  const activePlan = getActivePlan();
+  document.getElementById('modal-title').textContent = `// ${tr('plans')}`;
+  document.getElementById('modal-body').innerHTML = `
+    <div class="plans-usage">
+      <div>
+        <span>${metrics.totalNodes}</span>
+        <label>${tr('nodesUsed')}</label>
+      </div>
+      <div>
+        <span>${metrics.activeSpaces}</span>
+        <label>${tr('spaces')}</label>
+      </div>
+      <div>
+        <span>${metrics.totalEdges}</span>
+        <label>${tr('links').toLowerCase()}</label>
+      </div>
+    </div>
+    <div class="plans-grid">
+      ${Object.values(SUBSCRIPTION_PLANS).map(plan => {
+        const planCopy = getLocalizedPlan(plan);
+        return `
+        <div class="plan-card ${plan.id === activePlan.id ? 'active' : ''}">
+          <div class="plan-card-top">
+            <div>
+              <div class="plan-name">${plan.name}</div>
+              <div class="plan-tagline">${escHtml(planCopy.tagline)}</div>
+            </div>
+            <div class="plan-price">${plan.price}</div>
+          </div>
+          <div class="plan-limits">
+            <div><span>${formatPlanLimit(plan.limits.spaces)}</span> ${tr('spaces')}</div>
+            <div><span>${formatPlanLimit(plan.limits.nodes)}</span> ${tr('nodes').toLowerCase()}</div>
+            <div><span>${formatPlanLimit(plan.limits.links)}</span> ${tr('links').toLowerCase()}</div>
+          </div>
+          <div class="plan-features">
+            ${planCopy.features.map(feature => `<div>${escHtml(feature)}</div>`).join('')}
+          </div>
+          <div class="plan-note">${escHtml(planCopy.note)}</div>
+          <button class="plan-select" onclick="selectSubscriptionPlan('${plan.id}')">${plan.id === activePlan.id ? tr('currentPlan') : tr('selectPreview')}</button>
+        </div>
+      `;
+      }).join('')}
+    </div>
+    <div class="plan-disclaimer">${tr('prototypeBilling')}</div>
+  `;
+  modal.style.display = 'flex';
+}
+
+function selectSubscriptionPlan(planId) {
+  if (!SUBSCRIPTION_PLANS[planId]) return;
+  state.subscriptionPlan = planId;
+  saveState();
+  openSubscriptionModal();
+  renderHub();
+  updatePlanBadges();
+  showToast(`✓ ${tr('plan')}: ${SUBSCRIPTION_PLANS[planId].name}`);
+}
+
+function updatePlanBadges() {
+  document.querySelectorAll('[data-plan]').forEach(el => {
+    const required = el.dataset.plan;
+    const allowed = planAllows(required);
+    el.classList.toggle('locked-feature', !allowed);
+    el.querySelectorAll('.plan-badge').forEach(badge => {
+      badge.style.display = allowed ? 'none' : '';
+      badge.textContent = required.toUpperCase();
+    });
+  });
+}
+
+// ===== NEW SPACE MODAL =====
+function openNewSpaceModal() {
+  if (!canUsePlanResource('spaces', state.spaces.length + 1)) {
+    showPlanLimit('spaces');
+    return;
+  }
+  newSpaceEmoji = '🧠';
+  newSpaceColor = '#00f5ff';
+  newSpaceTemplate = 'blank';
+  const modal = document.getElementById('modal');
+  modal.querySelector('.modal-box')?.classList.remove('modal-box-wide');
+  document.getElementById('modal-title').textContent = `// ${tr('newSpace')}`;
+  document.getElementById('modal-body').innerHTML = `
+    <input class="modal-input" type="text" id="new-space-name" placeholder="${tr('newSpace')}..." autofocus>
+    <div class="modal-field-label">${tr('template')}</div>
+    <div class="template-grid">
+      ${Object.keys(SPACE_TEMPLATES).map(id => {
+        const tpl = getLocalizedTemplate(id);
+        return `
+        <button class="template-card ${id === newSpaceTemplate ? 'active' : ''}" onclick="selectSpaceTemplate('${id}',this)" type="button">
+          <span>${escHtml(tpl.name)}</span>
+          <small>${escHtml(tpl.desc)}</small>
+        </button>
+      `;
+      }).join('')}
+    </div>
+    <div class="modal-field-label">${tr('visualTone')}</div>
+    <div class="modal-tone-row">
+      ${COLORS.map((c, i) => `<button class="modal-tone ${c===newSpaceColor?'active':''}" style="--tone:${c}" onclick="selectSpaceColor('${c}',this)" type="button"><span>${String(i + 1).padStart(2, '0')}</span></button>`).join('')}
+    </div>
+    <div class="modal-actions">
+      <button class="modal-btn modal-btn-primary" onclick="createSpace()"><span>${tr('create')}</span></button>
+      <button class="modal-btn modal-btn-secondary" onclick="closeModal()">${tr('cancel')}</button>
     </div>
   `;
   modal.style.display = 'flex';
@@ -274,19 +1096,67 @@ function selectEmoji(e, el) {
 
 function selectSpaceColor(c, el) {
   newSpaceColor = c;
-  document.querySelectorAll('#modal-body [style*="border-radius:50%"]').forEach(el2 => el2.style.borderColor = 'transparent');
-  el.style.borderColor = 'white';
+  document.querySelectorAll('.modal-tone').forEach(el2 => el2.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function selectSpaceTemplate(templateId, el) {
+  if (!SPACE_TEMPLATES[templateId]) return;
+  newSpaceTemplate = templateId;
+  document.querySelectorAll('.template-card').forEach(card => card.classList.remove('active'));
+  el.classList.add('active');
 }
 
 function createSpace() {
   const name = document.getElementById('new-space-name')?.value.trim();
-  if (!name) { showToast('⚠ Введите название'); return; }
+  if (!name) { showToast(`⚠ ${tr('enterName')}`); return; }
+  if (!canUsePlanResource('spaces', state.spaces.length + 1)) {
+    showPlanLimit('spaces');
+    return;
+  }
+  const template = getLocalizedTemplate(newSpaceTemplate);
+  if (!canUsePlanResource('nodes', getHubMetrics().totalNodes + template.nodes.length)) {
+    showPlanLimit('nodes');
+    return;
+  }
+  if (!canUsePlanResource('links', getHubMetrics().totalEdges + template.edges.length)) {
+    showPlanLimit('links');
+    return;
+  }
   const space = { id: 'sp_' + (++state.spaceIdCounter), name, icon: newSpaceEmoji, color: newSpaceColor };
   state.spaces.unshift(space);
+  createTemplateContent(space.id, newSpaceTemplate);
   saveState();
   closeModal();
-  showToast('✓ Пространство "' + name + '" создано');
+  showToast(`✓ ${tr('spaceCreated')}: ${name}`);
   renderHub();
+}
+
+function createTemplateContent(spaceId, templateId) {
+  const template = getLocalizedTemplate(templateId);
+  const idMap = [];
+  template.nodes.forEach(node => {
+    const id = 'n_' + (++state.nodeIdCounter);
+    idMap.push(id);
+    state.nodes[id] = {
+      id,
+      spaceId,
+      x: node.x,
+      y: node.y,
+      title: node.title,
+      desc: node.desc || '',
+      tags: node.tags || '',
+      colorIdx: node.colorIdx || 0,
+      type: node.type || 'idea'
+    };
+  });
+  template.edges.forEach(([fromIdx, toIdx]) => {
+    const from = idMap[fromIdx];
+    const to = idMap[toIdx];
+    if (!from || !to) return;
+    const id = 'e_' + (++state.edgeIdCounter);
+    state.edges[id] = { id, spaceId, from, to };
+  });
 }
 
 function handleModalClick(e) {
@@ -295,6 +1165,7 @@ function handleModalClick(e) {
   }
 }
 function closeModal() {
+  document.querySelector('.modal-box')?.classList.remove('modal-box-wide');
   document.getElementById('modal').style.display = 'none';
 }
 
@@ -315,6 +1186,7 @@ function renderEngine() {
   setTool('select');
   renderCanvas();
   applyView();
+  updatePlanBadges();
 }
 
 function getSpaceNodes() {
@@ -332,10 +1204,12 @@ function renderCanvas() {
   nodes.forEach(node => world.appendChild(createNodeEl(node)));
   renderEdges();
   updateStats();
+  renderConnectionSuggestions(state.selectedNodeId);
 }
 
 function createNodeEl(node) {
   const colorSet = NODE_COLORS[node.colorIdx || 0];
+  const type = NODE_TYPES[node.type || 'idea'] || NODE_TYPES.idea;
   const div = document.createElement('div');
   div.className = 'node';
   div.id = 'node-' + node.id;
@@ -350,13 +1224,15 @@ function createNodeEl(node) {
     <div class="node-header">
       <div class="node-dot" style="background:${colorSet.dot};box-shadow:0 0 8px ${colorSet.dot}"></div>
       <div class="node-title">${escHtml(node.title)}</div>
+      <div class="node-type" style="border-color:${type.color};color:${type.color}" title="${escAttr(typeLabel(node.type || 'idea'))}">${type.short}</div>
     </div>
     ${node.desc ? `<div class="node-desc">${escHtml(node.desc)}</div>` : ''}
     ${tagsHtml ? `<div class="node-tags">${tagsHtml}</div>` : ''}
     <div class="node-actions">
-      <button class="node-action-btn" onclick="editNode(event,'${node.id}')">EDIT</button>
-      <button class="node-action-btn" onclick="addSubnode(event,'${node.id}')">+SUB</button>
-      <button class="node-action-btn danger" onclick="deleteNode(event,'${node.id}')">DEL</button>
+      <button class="node-action-btn" onclick="editNode(event,'${node.id}')">${tr('edit')}</button>
+      <button class="node-action-btn" onclick="addSubnode(event,'${node.id}')">${tr('subnode')}</button>
+      <button class="node-action-btn" onclick="startConnect('${node.id}',event)">${tr('addLink')}</button>
+      <button class="node-action-btn danger" onclick="deleteNode(event,'${node.id}')">${tr('del')}</button>
     </div>
     <div class="node-connect-handle" data-node="${node.id}"></div>
   `;
@@ -391,11 +1267,11 @@ function renderEdges() {
     path.setAttribute('class', 'edge-path');
     path.setAttribute('data-edge', edge.id);
     path.addEventListener('click', () => {
-      if (confirm('Удалить связь?')) {
+      if (confirm(tr('deleteLinkConfirm'))) {
         delete state.edges[edge.id];
         saveState();
         renderCanvas();
-        showToast('🗑 Связь удалена');
+        showToast(`✓ ${tr('delete')}`);
       }
     });
     svg.appendChild(path);
@@ -500,27 +1376,32 @@ function addNodeAt(e) {
   const rect = wrap.getBoundingClientRect();
   const x = (e.clientX - rect.left - state.view.x) / state.view.scale;
   const y = (e.clientY - rect.top - state.view.y) / state.view.scale;
-  createNode(x - 70, y - 30, 'Новая идея', '');
+  createNode(x - 70, y - 30, tr('typeIdea'), '');
 }
 
-function createNode(x, y, title, desc, colorIdx) {
+function createNode(x, y, title, desc, colorIdx, type = 'idea') {
+  if (!canUsePlanResource('nodes', getHubMetrics().totalNodes + 1)) {
+    showPlanLimit('nodes');
+    return null;
+  }
   const id = 'n_' + (++state.nodeIdCounter);
   state.nodes[id] = {
     id,
     spaceId: state.currentSpaceId,
     x,
     y,
-    title: title || 'Новая идея',
+    title: title || tr('typeIdea'),
     desc: desc || '',
     tags: '',
-    colorIdx: colorIdx || 0
+    colorIdx: colorIdx || 0,
+    type
   };
   saveState();
   const world = document.getElementById('canvas-world');
   if (world) world.appendChild(createNodeEl(state.nodes[id]));
   updateStats();
   selectNode(id);
-  showToast('✓ Узел добавлен');
+  showToast(`✓ ${tr('addNode')}`);
   return id;
 }
 
@@ -548,33 +1429,85 @@ function quickCapture() {
     .filter(Boolean);
 
   if (!items.length) {
-    showToast('Type a thought first');
+    showToast(`⚠ ${tr('quickPlaceholder')}`);
     input.focus();
     return;
   }
 
   let lastId = null;
-  items.forEach((title, index) => {
+  let captured = 0;
+  for (let index = 0; index < items.length; index++) {
+    const title = items[index];
     const pos = getQuickCapturePosition(index, items.length);
     lastId = createNode(pos.x, pos.y, title, '', index % NODE_COLORS.length);
-  });
+    if (!lastId) break;
+    captured++;
+  }
 
   input.value = '';
   renderCanvas();
   if (lastId) selectNode(lastId);
-  showToast(items.length === 1 ? 'Captured 1 thought' : `Captured ${items.length} thoughts`);
+  if (captured) showToast(`${tr('capture')}: ${captured}`);
 }
 
 function addSubnode(e, parentId) {
   e.stopPropagation();
   const parent = state.nodes[parentId];
   if (!parent) return;
-  const id = createNode(parent.x + 200, parent.y, 'Подтема', '');
+  const id = createNode(parent.x + 200, parent.y, tr('subnode').replace('+', ''), '');
+  if (!id) return;
+  if (!canUsePlanResource('links', getHubMetrics().totalEdges + 1)) {
+    showPlanLimit('links');
+    return;
+  }
   const eid = 'e_' + (++state.edgeIdCounter);
   state.edges[eid] = { id: eid, spaceId: state.currentSpaceId, from: parentId, to: id };
   saveState();
   renderCanvas();
-  showToast('✓ Связь добавлена');
+  showToast(`✓ ${tr('links')}`);
+}
+
+function duplicateSelectedNode() {
+  if (!requirePlan('plus', tr('duplicate'))) return;
+  const source = state.nodes[state.selectedNodeId];
+  if (!source) { showToast(`⚠ ${tr('suggestEmpty')}`); return; }
+  const id = createNode(source.x + 34, source.y + 34, source.title + ' copy', source.desc || '', source.colorIdx || 0, source.type || 'idea');
+  if (!id) return;
+  state.nodes[id].tags = source.tags || '';
+  saveState();
+  renderCanvas();
+  selectNode(id);
+  showToast(`✓ ${tr('duplicated')}`);
+}
+
+function focusSelectedNode() {
+  const node = state.nodes[state.selectedNodeId];
+  if (!node) { showToast(`⚠ ${tr('suggestEmpty')}`); return; }
+  const wrap = document.getElementById('canvas-wrap');
+  if (!wrap) return;
+  const rect = wrap.getBoundingClientRect();
+  state.view.scale = Math.max(0.8, Math.min(1.4, state.view.scale));
+  state.view.x = rect.width / 2 - (node.x + 80) * state.view.scale;
+  state.view.y = rect.height / 2 - (node.y + 40) * state.view.scale;
+  applyView();
+  showToast(`✓ ${tr('focusNode')}`);
+}
+
+function highlightIsolatedNodes() {
+  const connected = new Set();
+  getSpaceEdges().forEach(edge => {
+    connected.add(edge.from);
+    connected.add(edge.to);
+  });
+  let count = 0;
+  document.querySelectorAll('.node').forEach(el => el.classList.remove('search-highlight'));
+  getSpaceNodes().forEach(node => {
+    if (!connected.has(node.id)) {
+      document.getElementById('node-' + node.id)?.classList.add('search-highlight');
+      count++;
+    }
+  });
+  showToast(count ? `${tr('isolated')}: ${count}` : `${tr('isolated')}: 0`);
 }
 
 function deleteNode(e, nodeId) {
@@ -587,13 +1520,36 @@ function deleteNode(e, nodeId) {
   saveState();
   if (state.selectedNodeId === nodeId) { state.selectedNodeId = null; closeNodeEditor(); }
   renderCanvas();
-  showToast('🗑 Узел удалён');
+  renderConnectionSuggestions(state.selectedNodeId);
+  showToast(`✓ ${tr('delete')}`);
 }
 
 function deleteSelected() {
   if (state.selectedNodeId) {
     deleteNode({ stopPropagation: ()=>{} }, state.selectedNodeId);
   }
+}
+
+function edgeExists(fromId, toId) {
+  return Object.values(state.edges).some(e =>
+    (e.from === fromId && e.to === toId) ||
+    (e.from === toId && e.to === fromId)
+  );
+}
+
+function createConnection(fromId, toId) {
+  if (!fromId || !toId || fromId === toId || edgeExists(fromId, toId)) return false;
+  if (!canUsePlanResource('links', getHubMetrics().totalEdges + 1)) {
+    showPlanLimit('links');
+    return false;
+  }
+  const eid = 'e_' + (++state.edgeIdCounter);
+  state.edges[eid] = { id: eid, spaceId: state.currentSpaceId, from: fromId, to: toId };
+  saveState();
+  renderEdges();
+  updateStats();
+  renderConnectionSuggestions(state.selectedNodeId || fromId);
+  return true;
 }
 
 // ===== SELECT =====
@@ -610,31 +1566,25 @@ function selectNode(id) {
     const deleteBtn = document.getElementById('delete-btn');
     if (deleteBtn) deleteBtn.style.display = 'none';
   }
+  renderConnectionSuggestions(id);
 }
 
 // ===== CONNECT =====
 function startConnect(nodeId, e) {
+  if (e?.stopPropagation) e.stopPropagation();
   state.connectSource = nodeId;
   setTool('connect');
   const indicator = document.getElementById('connect-indicator');
   if (indicator) indicator.classList.add('active');
-  showToast('⚡ Выберите целевой узел');
+  showToast(tr('connectionMode'));
 }
 
 function finishConnect(toId) {
   if (!state.connectSource || state.connectSource === toId) { cancelConnect(); return; }
-  const exists = Object.values(state.edges).some(e =>
-    (e.from === state.connectSource && e.to === toId) ||
-    (e.from === toId && e.to === state.connectSource)
-  );
-  if (exists) { showToast('⚠ Связь уже существует'); cancelConnect(); return; }
-  const eid = 'e_' + (++state.edgeIdCounter);
-  state.edges[eid] = { id: eid, spaceId: state.currentSpaceId, from: state.connectSource, to: toId };
-  saveState();
+  if (edgeExists(state.connectSource, toId)) { showToast(`⚠ ${tr('linkButton')} exists`); cancelConnect(); return; }
+  createConnection(state.connectSource, toId);
   cancelConnect();
-  renderEdges();
-  updateStats();
-  showToast('✓ Связь создана');
+  showToast(`✓ ${tr('links')}`);
 }
 
 function cancelConnect() {
@@ -664,6 +1614,75 @@ function updateTempEdge(e) {
   }
 }
 
+function tokenizeNode(node) {
+  return (node.title + ' ' + (node.desc || '') + ' ' + (node.tags || ''))
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(token => token.length > 2);
+}
+
+function getConnectionSuggestions(nodeId, limit = 4) {
+  const source = state.nodes[nodeId];
+  if (!source) return [];
+  const sourceTokens = new Set(tokenizeNode(source));
+  return getSpaceNodes()
+    .filter(node => node.id !== nodeId && !edgeExists(nodeId, node.id))
+    .map(node => {
+      const tokens = tokenizeNode(node);
+      const shared = tokens.filter(token => sourceTokens.has(token));
+      const dx = (node.x || 0) - (source.x || 0);
+      const dy = (node.y || 0) - (source.y || 0);
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const distanceScore = Math.max(0, 1 - distance / 900);
+      const score = shared.length * 3 + distanceScore;
+      return {
+        node,
+        score,
+        shared: [...new Set(shared)].slice(0, 3),
+        reason: shared.length ? 'context' : 'nearby'
+      };
+    })
+    .filter(item => item.score > 0.12)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+function renderConnectionSuggestions(nodeId) {
+  const panel = document.getElementById('connection-suggestions');
+  if (!panel) return;
+  const title = `<div class="engine-sidebar-title">// ${tr('suggestedLinks')}</div>`;
+  if (!nodeId || !state.nodes[nodeId]) {
+    panel.innerHTML = title + `<div class="suggestion-empty">${tr('suggestEmpty')}</div>`;
+    return;
+  }
+
+  const source = state.nodes[nodeId];
+  const suggestions = getConnectionSuggestions(nodeId);
+  if (!suggestions.length) {
+    panel.innerHTML = title + `<div class="suggestion-source">${escHtml(source.title)}</div><div class="suggestion-empty">${tr('noSuggestions')}</div>`;
+    return;
+  }
+
+  panel.innerHTML = title + `
+    <div class="suggestion-source">${escHtml(source.title)}</div>
+    ${suggestions.map(item => `
+      <button class="suggestion-item" onclick="connectSuggested('${nodeId}','${item.node.id}')">
+        <span class="suggestion-name">${escHtml(item.node.title)}</span>
+        <span class="suggestion-reason">${item.reason}${item.shared.length ? ': ' + escHtml(item.shared.join(', ')) : ''}</span>
+      </button>
+    `).join('')}
+  `;
+}
+
+function connectSuggested(fromId, toId) {
+  if (createConnection(fromId, toId)) {
+    selectNode(toId);
+    showToast(`✓ ${tr('linkButton')}`);
+  } else {
+    showToast(`⚠ ${tr('linkButton')} exists`);
+  }
+}
+
 // ===== NODE EDITOR =====
 function editNode(e, nodeId) {
   e.stopPropagation();
@@ -673,6 +1692,13 @@ function editNode(e, nodeId) {
   document.getElementById('editor-title').value = node.title;
   document.getElementById('editor-desc').value = node.desc || '';
   document.getElementById('editor-tags').value = node.tags || '';
+  const typeSelect = document.getElementById('editor-type');
+  if (typeSelect) {
+    typeSelect.innerHTML = Object.entries(NODE_TYPES)
+      .map(([id]) => `<option value="${id}">${typeLabel(id)}</option>`)
+      .join('');
+    typeSelect.value = node.type || 'idea';
+  }
   document.querySelectorAll('.color-swatch').forEach(s => {
     s.classList.toggle('active', parseInt(s.dataset.idx) === (node.colorIdx || 0));
   });
@@ -683,7 +1709,7 @@ function editNode(e, nodeId) {
     const connectedNodes = connectedIds.map(id => state.nodes[id]).filter(Boolean);
     connEl.innerHTML = connectedNodes.length
       ? connectedNodes.map(n => `<span class="connected-node-badge" onclick="selectNode('${n.id}')">${escHtml(n.title)}</span>`).join('')
-      : '<span style="color:var(--text-dim)">Нет связей</span>';
+      : `<span style="color:var(--text-dim)">${tr('noSuggestions')}</span>`;
   }
   document.getElementById('node-editor')?.classList.add('open');
 }
@@ -709,9 +1735,10 @@ function saveNodeEdit() {
   if (!state.selectedNodeId) return;
   const node = state.nodes[state.selectedNodeId];
   if (!node) return;
-  node.title = document.getElementById('editor-title')?.value || 'Без названия';
+  node.title = document.getElementById('editor-title')?.value || tr('title');
   node.desc = document.getElementById('editor-desc')?.value || '';
   node.tags = document.getElementById('editor-tags')?.value || '';
+  node.type = document.getElementById('editor-type')?.value || 'idea';
   const activeColor = document.querySelector('.color-swatch.active');
   if (activeColor) node.colorIdx = parseInt(activeColor.dataset.idx);
   saveState();
@@ -719,6 +1746,14 @@ function saveNodeEdit() {
   if (el) {
     const titleEl = el.querySelector('.node-title');
     if (titleEl) titleEl.textContent = node.title;
+    const typeEl = el.querySelector('.node-type');
+    const type = NODE_TYPES[node.type] || NODE_TYPES.idea;
+    if (typeEl) {
+      typeEl.textContent = type.short;
+      typeEl.title = typeLabel(node.type || 'idea');
+      typeEl.style.borderColor = type.color;
+      typeEl.style.color = type.color;
+    }
     const descEl = el.querySelector('.node-desc');
     if (node.desc) {
       if (descEl) descEl.textContent = node.desc;
@@ -741,7 +1776,7 @@ function saveNodeEdit() {
     }
   }
   closeNodeEditor();
-  showToast('✓ Сохранено');
+  showToast(`✓ ${tr('save')}`);
 }
 
 function closeNodeEditor() {
@@ -760,7 +1795,7 @@ function autoLayout() {
   saveState();
   renderCanvas();
   fitView();
-  showToast('✓ Авто-размещение применено');
+  showToast(`✓ ${tr('autoLayout')}`);
 }
 
 // ===== STATS =====
@@ -770,6 +1805,8 @@ function updateStats() {
   const statNodes = document.getElementById('stat-nodes');
   const statEdges = document.getElementById('stat-edges');
   const statDensity = document.getElementById('stat-density');
+  const statPlan = document.getElementById('stat-plan');
+  const statUsage = document.getElementById('stat-usage');
   if (statNodes) statNodes.textContent = nodeCount;
   if (statEdges) statEdges.textContent = edgeCount;
   if (statDensity) {
@@ -777,21 +1814,30 @@ function updateStats() {
     const density = maxEdges > 0 ? Math.round((edgeCount / maxEdges) * 100) : 0;
     statDensity.textContent = density + '%';
   }
+  if (statPlan) statPlan.textContent = getActivePlan().name;
+  if (statUsage) {
+    const metrics = getHubMetrics();
+    const plan = getActivePlan();
+    statUsage.textContent = `${metrics.totalNodes}/${formatPlanLimit(plan.limits.nodes)} N`;
+    statUsage.title = `${metrics.totalEdges}/${formatPlanLimit(plan.limits.links)} links`;
+  }
 }
 
 // ===== SMART CONNECT =====
 function smartConnect() {
+  if (!requirePlan('plus', tr('smartLinks'))) return;
   const nodes = getSpaceNodes();
-  if (nodes.length < 2) { showToast('⚠ Нужно минимум 2 узла'); return; }
+  if (nodes.length < 2) { showToast(`⚠ ${tr('nodes')}: 2+`); return; }
   const progressDiv = document.getElementById('smart-connect-progress');
   const progressFill = document.getElementById('progress-fill');
   const progressText = document.getElementById('progress-text');
-if (progressDiv) {
-  progressDiv.style.display = 'block';
-  progressDiv.style.opacity = '1';
-}
-if (progressFill) progressFill.style.width = '0%';
-if (progressText) progressText.textContent = 'Анализ узлов...';
+  if (progressDiv) {
+    clearTimeout(progressDiv._hideTimer);
+    progressDiv.style.display = 'block';
+    progressDiv.style.opacity = '1';
+  }
+  if (progressFill) progressFill.style.width = '0%';
+  if (progressText) progressText.textContent = tr('analyzingNodes');
   const existingEdges = new Set();
   getSpaceEdges().forEach(e => existingEdges.add(e.from + '|' + e.to));
   let totalPairs = nodes.length * (nodes.length - 1) / 2;
@@ -799,30 +1845,35 @@ if (progressText) progressText.textContent = 'Анализ узлов...';
   let newEdges = 0;
   let i = 0, j = 1;
   function tokenize(text) {
-    return text.toLowerCase().replace(/[^\w\sа-яё]/g, '').split(/\s+/).filter(w => w.length > 2);
+    return text.toLowerCase().replace(/[^\w\sа-яёіїєґ]/g, '').split(/\s+/).filter(w => w.length > 2);
+  }
+  function finishSmartConnect(message) {
+    if (progressText) progressText.textContent = message || `✓ ${tr('smartDone')}`;
+    if (progressFill) progressFill.style.width = '100%';
+    if (progressDiv) {
+      progressDiv._hideTimer = setTimeout(() => {
+        progressDiv.style.opacity = '0';
+        progressDiv._hideTimer = setTimeout(() => {
+          progressDiv.style.display = 'none';
+        }, 220);
+      }, 350);
+    }
+    saveState();
+    renderCanvas();
+    showToast(`${tr('smartLinks')}: ${newEdges} ${tr('links').toLowerCase()}`);
   }
   function step() {
     if (i >= nodes.length) {
-     if (progressText) progressText.textContent = 'Готово ✓';
-
-if (progressDiv) {
-  setTimeout(() => {
-    progressDiv.style.opacity = '0';
-
-    setTimeout(() => {
-      progressDiv.style.display = 'none';
-    }, 300);
-  }, 700);
-}
-      saveState();
-      renderCanvas();
-      showToast(`🧠 Создано ${newEdges} новых связей`);
+      finishSmartConnect(`✓ ${tr('smartDone')}`);
       return;
     }
     if (j >= nodes.length) {
       i++;
       j = i + 1;
-      if (i >= nodes.length) { step(); return; }
+      if (i >= nodes.length - 1) {
+        finishSmartConnect(`✓ ${tr('smartDone')}`);
+        return;
+      }
     }
     const a = nodes[i], b = nodes[j];
     const key1 = a.id + '|' + b.id;
@@ -836,6 +1887,11 @@ if (progressDiv) {
       const totalTokens = new Set([...tokensA, ...tokensB]).size;
       const similarity = totalTokens > 0 ? common / totalTokens : 0;
       if (similarity >= 0.3) {
+        if (!canUsePlanResource('links', getHubMetrics().totalEdges + newEdges + 1)) {
+          finishSmartConnect(tr('linkLimit'));
+          showPlanLimit('links');
+          return;
+        }
         const eid = 'e_' + (++state.edgeIdCounter);
         state.edges[eid] = { id: eid, spaceId: state.currentSpaceId, from: a.id, to: b.id };
         existingEdges.add(key1);
@@ -847,10 +1903,22 @@ if (progressDiv) {
     j++;
     const pct = Math.min(100, Math.round((processed / totalPairs) * 100));
     if (progressFill) progressFill.style.width = pct + '%';
-    if (progressText) progressText.textContent = `Анализ: ${processed}/${totalPairs} пар`;
-    setTimeout(step, 0);
+    if (progressText) progressText.textContent = `${tr('analyzingNodes')} ${processed}/${totalPairs}`;
+    setTimeout(() => {
+      try {
+        step();
+      } catch (err) {
+        console.error(err);
+        finishSmartConnect(tr('smartStopped'));
+      }
+    }, 0);
   }
-  step();
+  try {
+    step();
+  } catch (err) {
+    console.error(err);
+    finishSmartConnect(tr('smartStopped'));
+  }
 }
 
 // ===== SEARCH =====
@@ -879,10 +1947,10 @@ function exportSpaceJSON() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = (space.name || 'space').replace(/[^a-zа-яё0-9]/gi,'_') + '.json';
+  a.download = (space.name || 'space').replace(/[^a-zа-яёіїєґ0-9]/gi,'_') + '.json';
   a.click();
   URL.revokeObjectURL(url);
-  showToast('📋 Экспортировано');
+  showToast(`✓ ${tr('export')}`);
 }
 
 function importSpaceJSON() {
@@ -913,9 +1981,9 @@ function importSpaceJSON() {
           });
         }
         saveState();
-        showToast('📥 Пространство импортировано');
+        showToast(`✓ ${tr('importJson')}`);
         showPage('hub');
-      } catch (err) { showToast('⚠ Ошибка файла'); }
+      } catch (err) { showToast(`⚠ ${tr('fileError')}`); }
     };
     reader.readAsText(file);
   };
@@ -925,7 +1993,7 @@ function importSpaceJSON() {
 // ===== SETTINGS =====
 function setSettingsTab(tab) {
   document.querySelectorAll('.settings-nav-item').forEach((el, i) => {
-    const tabs = ['appearance', 'profile', 'data', 'about'];
+    const tabs = ['appearance', 'profile', 'data', 'friends', 'about'];
     el.classList.toggle('active', tabs[i] === tab);
   });
   renderSettings(tab);
@@ -936,10 +2004,19 @@ function renderSettings(tab) {
   if (!el) return;
   if (tab === 'appearance') {
     el.innerHTML = `
-      <div class="settings-section-title">Внешний <span>Вид</span></div>
-      <div class="settings-section-sub">// Настройка интерфейса</div>
+      <div class="settings-section-title">${tr('appearance')} <span>${tr('settings')}</span></div>
+      <div class="settings-section-sub">// ${tr('interfaceControl')}</div>
       <div class="settings-group">
-        <div class="settings-group-title">Тема</div>
+        <div class="settings-group-title">${tr('language')}</div>
+        <div class="language-cards">
+          <button class="language-card ${state.language==='en'?'active':''}" onclick="setLanguage('en')"><span>EN</span>${tr('english')}</button>
+          <button class="language-card ${state.language==='uk'?'active':''}" onclick="setLanguage('uk')"><span>UA</span>${tr('ukrainian')}</button>
+          <button class="language-card ${state.language==='ru'?'active':''}" onclick="setLanguage('ru')"><span>RU</span>${tr('russian')}</button>
+        </div>
+        <div class="settings-note">${tr('languageSub')}</div>
+      </div>
+      <div class="settings-group">
+        <div class="settings-group-title">${tr('theme')}</div>
         <div class="theme-cards">
           <div class="theme-card ${state.theme==='cyber'?'active':''}" onclick="applyTheme('cyber')"><div class="theme-card-preview" style="background:#040810"><div class="theme-card-bar" style="background:#00f5ff;width:80%"></div><div class="theme-card-bar" style="background:rgba(0,245,255,0.3);width:60%"></div></div><div class="theme-card-label">CYBER</div></div>
           <div class="theme-card ${state.theme==='glass'?'active':''}" onclick="applyTheme('glass')"><div class="theme-card-preview" style="background:linear-gradient(135deg,#1a1040,#0a1530)"><div class="theme-card-bar" style="background:rgba(255,255,255,0.6);width:80%"></div><div class="theme-card-bar" style="background:rgba(255,255,255,0.3);width:60%"></div></div><div class="theme-card-label">GLASS</div></div>
@@ -947,45 +2024,88 @@ function renderSettings(tab) {
         </div>
       </div>
       <div class="settings-group">
-        <div class="settings-group-title">Акцентный цвет</div>
+        <div class="settings-group-title">${tr('accentColor')}</div>
         <div class="accent-colors">
           ${COLORS.map(c => `<div class="accent-btn ${state.accentColor===c?'active':''}" style="background:${c}" onclick="applyAccent('${c}')"></div>`).join('')}
         </div>
+      </div>
+      <div class="settings-grid">
+        <div class="settings-feature"><div class="settings-feature-kicker">${tr('hubMode')}</div><div class="settings-feature-title">${tr('cleanHubTitle')}</div><div class="settings-feature-copy">${tr('cleanHubCopy')}</div></div>
+        <div class="settings-feature"><div class="settings-feature-kicker">${tr('graphMemory')}</div><div class="settings-feature-title">${tr('suggestionsTitle')}</div><div class="settings-feature-copy">${tr('suggestionsCopy')}</div></div>
       </div>
     `;
   } else if (tab === 'profile') {
     const user = state.users[state.currentUser] || {};
     el.innerHTML = `
-      <div class="settings-section-title">Профиль <span>Пользователя</span></div>
-      <div class="settings-section-sub">// Персональные данные</div>
+      <div class="settings-section-title">${tr('profileTitle')}</div>
+      <div class="settings-section-sub">// ${tr('identitySub')}</div>
       <div class="settings-group">
-        <div class="settings-group-title">Никнейм</div>
+        <div class="settings-group-title">${tr('nickname')}</div>
         <input class="editor-input" type="text" id="profile-nick" value="${escHtml(user.nick || '')}" style="max-width:300px;margin-bottom:12px">
-        <button class="editor-save-btn" style="max-width:160px" onclick="saveProfile()"><span>СОХРАНИТЬ</span></button>
+        <button class="editor-save-btn" style="max-width:160px" onclick="saveProfile()"><span>${tr('save')}</span></button>
+      </div>
+      <div class="settings-profile-card">
+        <div class="settings-profile-avatar">${escHtml((user.nick || 'NS').substring(0,2).toUpperCase())}</div>
+        <div>
+          <div class="settings-profile-name">${escHtml(user.nick || 'NeuroPilot')}</div>
+          <div class="settings-profile-sub">${state.spaces.length} ${tr('spaces')} / ${Object.keys(state.nodes).length} ${tr('nodes').toLowerCase()}</div>
+        </div>
       </div>
     `;
   } else if (tab === 'data') {
     el.innerHTML = `
-      <div class="settings-section-title">Управление <span>Данными</span></div>
-      <div class="settings-section-sub">// Экспорт и импорт всей базы</div>
+      <div class="settings-section-title">${tr('dataTitle')}</div>
+      <div class="settings-section-sub">// ${tr('dataSub')}</div>
       <div class="settings-group">
-        <button class="hub-download-btn" onclick="exportAllData()" style="margin-right:10px">⬇ Экспорт всей базы</button>
-        <button class="hub-download-btn" onclick="importAllData()">📥 Импорт всей базы</button>
-        <div style="margin-top:16px;font-size:12px;color:var(--text-dim)">Хранилище: localStorage (может быть ограничено)</div>
+        <button class="hub-download-btn" onclick="exportAllData()" style="margin-right:10px">${tr('exportBackup')}</button>
+        <button class="hub-download-btn" onclick="importAllData()">${tr('importBackup')}</button>
+        <div class="settings-note">${tr('storageNote')}</div>
+      </div>
+      <div class="settings-grid">
+        <div class="settings-feature"><div class="settings-feature-kicker">${tr('backup')}</div><div class="settings-feature-title">${tr('backupTitle')}</div><div class="settings-feature-copy">${tr('backupCopy')}</div></div>
+        <div class="settings-feature"><div class="settings-feature-kicker">${tr('safety')}</div><div class="settings-feature-title">${tr('restoreTitle')}</div><div class="settings-feature-copy">${tr('restoreCopy')}</div></div>
+      </div>
+    `;
+  } else if (tab === 'friends') {
+    el.innerHTML = `
+      <div class="settings-section-title">${tr('friendsTitle')}</div>
+      <div class="settings-section-sub">// ${tr('friendsSub')}</div>
+      <div class="locked-settings">
+        <div class="locked-badge">${tr('locked')}</div>
+        <div class="locked-title">${tr('friendsLockedTitle')}</div>
+        <div class="locked-copy">${tr('friendsLockedCopy')}</div>
+        <div class="locked-preview">
+          <div><span>${tr('match')}</span> ${tr('similarInterestsTags')}</div>
+          <div><span>${tr('invite')}</span> ${tr('sharedGraphSpaces')}</div>
+          <div><span>${tr('sync')}</span> ${tr('optionalProfileDiscovery')}</div>
+        </div>
       </div>
     `;
   } else if (tab === 'about') {
     el.innerHTML = `
-      <div class="settings-section-title">О <span>NeuroSpace</span></div>
-      <div class="settings-section-sub">// Цифровой расширитель памяти v2.1</div>
+      <div class="settings-section-title">${tr('about')} <span>NeuroSpace</span></div>
+      <div class="settings-section-sub">// ${tr('aboutSub')}</div>
       <div class="settings-group">
-        <p style="color:var(--text-dim);line-height:1.6">Создано для визуализации и связывания идей. Все данные хранятся локально в вашем браузере.</p>
+        <p style="color:var(--text-dim);line-height:1.6">${tr('aboutCopy')}</p>
       </div>
     `;
   }
 }
 
-function applyTheme(theme) {
+function setLanguage(language) {
+  if (!I18N[language]) return;
+  state.language = language;
+  saveState();
+  applyStaticTranslations();
+  const activeSettings = [...document.querySelectorAll('.settings-nav-item')].findIndex(item => item.classList.contains('active'));
+  const tabs = ['appearance', 'profile', 'data', 'friends', 'about'];
+  if (document.getElementById('settings')?.classList.contains('active')) renderSettings(tabs[activeSettings] || 'appearance');
+  if (document.getElementById('hub')?.classList.contains('active')) renderHub();
+  if (document.getElementById('engine')?.classList.contains('active')) renderEngine();
+  showToast(`✓ ${tr('languageChanged')}`);
+}
+
+function applyTheme(theme, silent = false) {
   state.theme = theme;
   saveState();
   const themes = {
@@ -1002,7 +2122,7 @@ function applyTheme(theme) {
   document.querySelectorAll('.theme-card').forEach(el => {
     el.classList.toggle('active', el.querySelector('.theme-card-label')?.textContent.toLowerCase() === theme);
   });
-  showToast('✓ Тема изменена: ' + theme.toUpperCase());
+  if (!silent) showToast(`✓ ${tr('themeChanged')}: ${theme.toUpperCase()}`);
 }
 
 function applyAccent(color) {
@@ -1012,7 +2132,7 @@ function applyAccent(color) {
   document.querySelectorAll('.accent-btn').forEach(el => {
     el.classList.toggle('active', el.style.background === color);
   });
-  showToast('✓ Акцентный цвет изменён');
+  showToast(`✓ ${tr('accentChanged')}`);
 }
 
 function applyAccentColor() {
@@ -1037,7 +2157,7 @@ function saveProfile() {
   if (state.users[state.currentUser]) {
     state.users[state.currentUser].nick = nick;
     saveState();
-    showToast('✓ Профиль сохранён');
+    showToast(`✓ ${tr('profileSaved')}`);
     renderHub();
   }
 }
@@ -1050,6 +2170,8 @@ function exportAllData() {
     edges: state.edges,
     theme: state.theme,
     accentColor: state.accentColor,
+    subscriptionPlan: state.subscriptionPlan,
+    language: state.language,
   }, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1057,7 +2179,7 @@ function exportAllData() {
   a.download = 'neurospace_full_backup.json';
   a.click();
   URL.revokeObjectURL(url);
-  showToast('📋 Полный бэкап сохранён');
+  showToast(`✓ ${tr('backupSaved')}`);
 }
 
 function importAllData() {
@@ -1071,18 +2193,20 @@ function importAllData() {
     reader.onload = (re) => {
       try {
         const data = JSON.parse(re.target.result);
-        if (confirm('Заменить все данные? Текущие данные будут потеряны.')) {
+        if (confirm(tr('replaceData'))) {
           state.users = data.users || {};
           state.spaces = data.spaces || [];
           state.nodes = data.nodes || {};
           state.edges = data.edges || {};
           state.theme = data.theme || 'cyber';
           state.accentColor = data.accentColor || '#00f5ff';
+          state.subscriptionPlan = data.subscriptionPlan || 'basic';
+          state.language = data.language || state.language || 'uk';
           saveState();
-          showToast('📥 Данные импортированы');
+          showToast(`✓ ${tr('imported')}`);
           showPage('hub');
         }
-      } catch (err) { showToast('⚠ Ошибка файла'); }
+      } catch (err) { showToast(`⚠ ${tr('fileError')}`); }
     };
     reader.readAsText(file);
   };
@@ -1091,6 +2215,7 @@ function importAllData() {
 
 // ===== AI PANEL =====
 function toggleAIPanel() {
+  if (!requirePlan('pro', tr('aiAssistant'))) return;
   const panel = document.getElementById('ai-panel');
   if (!panel) return;
   panel.classList.toggle('open');
@@ -1104,43 +2229,113 @@ function closeAIPanel() {
 function generateAIResponse() {
   const responseEl = document.getElementById('ai-response-content');
   if (!responseEl) return;
-  responseEl.innerHTML = '<div class="ai-loading">Анализ графа...</div>';
+  responseEl.innerHTML = `<div class="ai-loading">${tr('aiLoading')}</div>`;
   const nodes = getSpaceNodes();
   const edges = getSpaceEdges();
   if (nodes.length === 0) {
-    responseEl.innerHTML = '<p>Нет узлов для анализа.</p>';
+    responseEl.innerHTML = `<p>${tr('aiNoNodes')}</p>`;
     return;
   }
-  let context = 'Граф знаний:\n';
+  let context = `${tr('aiContextTitle')}:\n`;
   nodes.forEach(n => {
-    context += `- [${n.title}] ${n.desc || ''} (теги: ${n.tags || 'нет'})\n`;
+    context += `- [${n.title}] ${n.desc || ''} (${tr('tags').toLowerCase()}: ${n.tags || tr('tagsNone')})\n`;
   });
-  context += '\nСвязи:\n';
+  context += `\n${tr('links')}:\n`;
   edges.forEach(e => {
     const from = state.nodes[e.from]?.title || '?';
     const to = state.nodes[e.to]?.title || '?';
-    context += `${from} ↔ ${to}\n`;
+    context += `${from} <-> ${to}\n`;
   });
   setTimeout(() => {
-    const ideas = [
-      'Объедините узлы «Главная идея» и «Направление A» в новый подпроект для лучшей организации.',
-      'Узел «Конкретный шаг» слабо связан — добавьте промежуточные задачи.',
-      'Обнаружена кластеризация: два направления развития. Создайте отдельные пространства.',
-      'Добавьте тег «важное» к срочным узлам для быстрой фильтрации.',
-    ];
+    const ideas = [tr('aiIdea1'), tr('aiIdea2'), tr('aiIdea3'), tr('aiIdea4')];
     const randomIdea = ideas[Math.floor(Math.random() * ideas.length)];
     responseEl.innerHTML = `
-      <p>🧠 <strong>AI-ассистент (локальный)</strong></p>
+      <p>🧠 <strong>${tr('aiLocalTitle')}</strong></p>
       <p>${randomIdea}</p>
-      <p style="margin-top:12px;color:var(--text-dim);font-size:12px;">Контекст графа готов к отправке во внешний ИИ.</p>
+      <p style="margin-top:12px;color:var(--text-dim);font-size:12px;">${tr('aiContextReady')}</p>
       <p style="color:var(--text-dim);font-size:10px;">${context.replace(/\n/g,'<br>')}</p>
     `;
   }, 800);
 }
 
+// ===== COMMAND PALETTE =====
+function getCommandItems() {
+  const inEngine = document.getElementById('engine')?.classList.contains('active');
+  return [
+    { name: tr('newSpace'), hint: tr('startClean'), action: openNewSpaceModal },
+    { name: tr('plans'), hint: tr('managePlan'), action: openSubscriptionModal },
+    { name: tr('settings'), hint: tr('interfaceControl'), action: () => showPage('settings') },
+    { name: tr('friendsTitle'), hint: tr('friendsSub'), action: openFriendsLocked },
+    { name: `${tr('export')} HTML`, hint: tr('downloaded'), action: () => downloadSite({ preventDefault: () => {} }) },
+    { name: tr('backHub'), hint: tr('mySpaces'), action: () => showPage('hub'), enabled: inEngine },
+    { name: tr('quickCapture'), hint: tr('quickPlaceholder'), action: () => document.getElementById('quick-capture-input')?.focus(), enabled: inEngine },
+    { name: tr('addNode'), hint: tr('tools'), action: () => setTool('node'), enabled: inEngine },
+    { name: tr('connect'), hint: tr('connectionMode'), action: () => setTool('connect'), enabled: inEngine },
+    { name: tr('autoLayout'), hint: tr('actions'), action: autoLayout, enabled: inEngine },
+    { name: tr('isolated'), hint: tr('suggestedLinks'), action: highlightIsolatedNodes, enabled: inEngine },
+    { name: tr('smartLinks'), hint: tr('suggestedLinks'), action: smartConnect, enabled: inEngine },
+    { name: tr('fitView'), hint: tr('actions'), action: fitView, enabled: inEngine },
+    { name: tr('exportJson'), hint: tr('export'), action: exportSpaceJSON, enabled: inEngine }
+  ].filter(item => item.enabled !== false);
+}
+
+function openCommandPalette() {
+  const palette = document.getElementById('command-palette');
+  const input = document.getElementById('command-input');
+  if (!palette || !input) return;
+  palette.style.display = 'flex';
+  input.value = '';
+  renderCommandPalette('');
+  input.focus();
+  input.select();
+}
+
+function closeCommandPalette() {
+  const palette = document.getElementById('command-palette');
+  if (palette) palette.style.display = 'none';
+}
+
+function renderCommandPalette(query) {
+  const list = document.getElementById('command-list');
+  if (!list) return;
+  const q = query.trim().toLowerCase();
+  const commands = getCommandItems()
+    .filter(cmd => !q || (cmd.name + ' ' + cmd.hint).toLowerCase().includes(q))
+    .slice(0, 8);
+  list.innerHTML = commands.length
+    ? commands.map((cmd, index) => `
+      <button class="command-item ${index === 0 ? 'active' : ''}" onclick="runCommandByName('${escAttr(cmd.name)}')">
+        <span>${escHtml(cmd.name)}</span>
+        <small>${escHtml(cmd.hint)}</small>
+      </button>
+    `).join('')
+    : `<div class="command-empty">${tr('noCommands')}</div>`;
+}
+
+function runCommandByName(name) {
+  const command = getCommandItems().find(item => item.name === name);
+  if (!command) return;
+  closeCommandPalette();
+  command.action();
+}
+
+function runFirstCommand() {
+  const input = document.getElementById('command-input');
+  const q = input?.value.trim().toLowerCase() || '';
+  const command = getCommandItems().find(cmd => !q || (cmd.name + ' ' + cmd.hint).toLowerCase().includes(q));
+  if (command) {
+    closeCommandPalette();
+    command.action();
+  }
+}
+
 // ===== UTILS =====
 function escHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function escAttr(str) {
+  return escHtml(str).replace(/'/g, '&#39;');
 }
 
 function showToast(msg) {
@@ -1162,14 +2357,14 @@ function downloadSite(e) {
   a.download = 'neurospace.html';
   a.click();
   URL.revokeObjectURL(url);
-  showToast('⬇ Код загружается...');
+  showToast(`⬇ ${tr('downloaded')}`);
 }
 
 // ===== EVENT LISTENERS =====
 document.addEventListener('DOMContentLoaded', () => {
   loadState();
   applyAccentColor();
-  if (state.theme) applyTheme(state.theme);
+  if (state.theme) applyTheme(state.theme, true);
   if (state.currentUser) showPage('hub');
   else showPage('gate');
 
@@ -1188,6 +2383,29 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         quickCapture();
       }
+    });
+  }
+
+  const commandInput = document.getElementById('command-input');
+  if (commandInput) {
+    commandInput.addEventListener('input', e => renderCommandPalette(e.target.value));
+    commandInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        runFirstCommand();
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        closeCommandPalette();
+      }
+    });
+  }
+  const commandPalette = document.getElementById('command-palette');
+  if (commandPalette) {
+    commandPalette.addEventListener('click', e => {
+      if (e.target === commandPalette) closeCommandPalette();
     });
   }
 
@@ -1235,6 +2453,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
 document.addEventListener('keydown', (e) => {
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target?.tagName);
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    openCommandPalette();
+    return;
+  }
+  if (e.key === 'Escape' && document.getElementById('command-palette')?.style.display === 'flex') {
+    closeCommandPalette();
+    return;
+  }
   if (e.key === 'Escape') { cancelConnect(); closeNodeEditor(); setTool('select'); }
   if (!typing && e.key === 'Delete' && state.selectedNodeId) deleteSelected();
   if (!typing && e.key === 'n' && !e.ctrlKey && !e.metaKey && document.getElementById('engine')?.classList.contains('active')) setTool('node');
