@@ -1,6 +1,6 @@
 const { supabase } = require('./supabaseClient');
 const path = require('path');
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
 
 let currentSupabaseUserId = null;
 
@@ -10,6 +10,11 @@ ipcMain.handle('app:quit', async () => {
 });
 
 ipcMain.handle('app:version', () => app.getVersion());
+
+ipcMain.handle('app:open-external', async (_event, url) => {
+  await shell.openExternal(url);
+  return { ok: true };
+});
 
 function isVersionGreater(latestVersion, currentVersion) {
   const normalize = (version) => String(version || '')
@@ -33,10 +38,12 @@ ipcMain.handle('app:check-updates', async () => {
   const currentVersion = app.getVersion();
 
   try {
-    const response = await fetch('https://raw.githubusercontent.com/Tekarugod/linkor-updates/main/latest.json');
+    const updateUrl = 'https://raw.githubusercontent.com/Tekarugod/linkor-updates/main/latest.json?t=' + Date.now();
+    const response = await fetch(updateUrl);
     if (!response.ok) throw new Error('Update check failed: ' + response.status);
 
     const latest = await response.json();
+    console.log('Update URL:', latest.url);
     const latestVersion = latest.version || currentVersion;
     const hasUpdate = isVersionGreater(latestVersion, currentVersion);
     const displayLatestVersion = String(latestVersion).startsWith('v') ? latestVersion : 'v' + latestVersion;

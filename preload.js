@@ -12,5 +12,6 @@ contextBridge.exposeInMainWorld('nodusBridge', {
 
   appQuit: () => ipcRenderer.invoke('app:quit'),
   getAppVersion: () => ipcRenderer.invoke('app:version'),
-  checkForUpdates: () => ipcRenderer.invoke('app:check-updates')
+  checkForUpdates: () => ipcRenderer.invoke('app:check-updates'),
+  openExternal: (url) => ipcRenderer.invoke('app:open-external', url)
 });

@@ -819,7 +819,7 @@ async function checkForUpdates() {
   try {
     const result = await window.nodusBridge?.checkForUpdates?.();
     if (result?.hasUpdate && result.url) {
-      window.open(result.url, '_blank');
+      await window.nodusBridge?.openExternal?.(result.url);
     }
     showToast(result?.message || 'Не вдалося перевірити оновлення');
   } catch (error) {
