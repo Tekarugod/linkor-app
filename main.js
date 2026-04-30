@@ -33,7 +33,7 @@ ipcMain.handle('app:check-updates', async () => {
   const currentVersion = app.getVersion();
 
   try {
-    const response = await fetch('https://raw.githubusercontent.com/Tekarugod/linkor-app/master/latest.json');
+    const response = await fetch('https://raw.githubusercontent.com/Tekarugod/linkor-updates/main/latest.json');
     if (!response.ok) throw new Error('Update check failed: ' + response.status);
 
     const latest = await response.json();
