@@ -818,6 +818,9 @@ async function loadAppVersion() {
 async function checkForUpdates() {
   try {
     const result = await window.nodusBridge?.checkForUpdates?.();
+    if (result?.hasUpdate && result.url) {
+      window.open(result.url, '_blank');
+    }
     showToast(result?.message || 'Не вдалося перевірити оновлення');
   } catch (error) {
     console.warn('Update check failed:', error);

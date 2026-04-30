@@ -11,14 +11,49 @@ ipcMain.handle('app:quit', async () => {
 
 ipcMain.handle('app:version', () => app.getVersion());
 
+function isVersionGreater(latestVersion, currentVersion) {
+  const normalize = (version) => String(version || '')
+    .replace(/^v/i, '')
+    .split('.')
+    .map(part => parseInt(part, 10) || 0);
+
+  const latest = normalize(latestVersion);
+  const current = normalize(currentVersion);
+  const length = Math.max(latest.length, current.length);
+
+  for (let i = 0; i < length; i++) {
+    if ((latest[i] || 0) > (current[i] || 0)) return true;
+    if ((latest[i] || 0) < (current[i] || 0)) return false;
+  }
+
+  return false;
+}
+
 ipcMain.handle('app:check-updates', async () => {
-  return {
-    ok: true,
-    hasUpdate: false,
-    currentVersion: app.getVersion(),
-    latestVersion: app.getVersion(),
-    message: 'У вас остання версія'
-  };
+  const currentVersion = app.getVersion();
+
+  try {
+    const response = await fetch('https://raw.githubusercontent.com/Tekarugod/linkor-app/master/latest.json');
+    if (!response.ok) throw new Error('Update check failed: ' + response.status);
+
+    const latest = await response.json();
+    const latestVersion = latest.version || currentVersion;
+    const hasUpdate = isVersionGreater(latestVersion, currentVersion);
+    const displayLatestVersion = String(latestVersion).startsWith('v') ? latestVersion : 'v' + latestVersion;
+
+    return {
+      ok: true,
+      hasUpdate,
+      currentVersion,
+      latestVersion,
+      url: latest.url || '',
+      notes: latest.notes || '',
+      message: hasUpdate ? 'Доступна нова версія ' + displayLatestVersion : 'У вас остання версія'
+    };
+  } catch (error) {
+    console.warn('Update check failed:', error);
+    return { ok: false, message: 'Не вдалося перевірити оновлення' };
+  }
 });
 
 async function getCurrentSupabaseUserId() {
