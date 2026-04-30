@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NeuroSpace v2.1 — Neural Knowledge Graph</title>
+    <title>Nodus AI — Thinking Graph</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -13,8 +13,8 @@
     <div class="gate-bg-grid"></div>
     <div class="gate-card">
         <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
-        <div class="gate-logo">NeuroSpace</div>
-        <div class="gate-subtitle">// digital memory expander v2.1</div>
+        <div class="gate-logo brand-logo"><span class="brand-mark"></span><span>Nodus AI</span></div>
+        <div class="gate-subtitle">// thinking graph engine</div>
 
         <div class="gate-tabs">
             <button class="gate-tab active" onclick="switchTab('login')">Вход</button>
@@ -56,17 +56,21 @@
 <!-- ===== HUB ===== -->
 <div id="hub" class="page">
     <div class="hub-topbar">
-        <div class="hub-logo">NeuroSpace</div>
+        <div class="hub-logo brand-logo"><span class="brand-mark"></span><span>Nodus AI</span></div>
+        <span id="app-version" class="hub-version">v...</span>
         <div class="hub-spacer"></div>
         <button class="hub-nav-btn plan" onclick="openSubscriptionModal()">Plans</button>
+        <button class="hub-nav-btn" onclick="syncCurrentUserToSupabase()">Sync</button>
+        <button class="hub-nav-btn" onclick="loadCurrentUserFromSupabase()">Load Cloud</button>
+        <div class="sync-status local" id="sync-status" title="Cloud sync status">Local only</div>
         <button class="hub-nav-btn locked" onclick="openFriendsLocked()">Friends</button>
-        <a class="hub-nav-btn" href="#" onclick="downloadSite(event)">Export</a>
         <button class="hub-nav-btn" onclick="showPage('settings')">Settings</button>
         <div class="hub-user">
             <div class="hub-avatar" id="hub-avatar">NS</div>
             <span class="hub-username" id="hub-username">NeuroPilot</span>
         </div>
         <button class="hub-logout-btn" onclick="doLogout()">ВЫЙТИ</button>
+        <button class="hub-power-btn" onclick="quitAppSafely()" title="&#x417;&#x430;&#x43a;&#x440;&#x438;&#x442;&#x438; &#x43f;&#x440;&#x43e;&#x433;&#x440;&#x430;&#x43c;&#x443;" aria-label="&#x417;&#x430;&#x43a;&#x440;&#x438;&#x442;&#x438; &#x43f;&#x440;&#x43e;&#x433;&#x440;&#x430;&#x43c;&#x443;">&#x23FB;</button>
     </div>
     <div class="hub-body">
         <div class="hub-header">
@@ -97,85 +101,145 @@
             <input type="text" placeholder="🔍 Поиск узлов..." id="node-search" oninput="searchNodes()">
         </div>
 
-        <div class="quick-capture">
-            <div class="engine-sidebar-title">// Quick Capture</div>
-            <textarea id="quick-capture-input" class="quick-capture-input" placeholder="One thought per line..."></textarea>
-            <button class="quick-capture-btn" onclick="quickCapture()"><span>+ CAPTURE</span></button>
-        </div>
-
-        <div class="connection-suggestions" id="connection-suggestions">
-            <div class="engine-sidebar-title">// Suggested Links</div>
-            <div class="suggestion-empty">Select a node to see smart link ideas</div>
-        </div>
-
-        <div class="engine-sidebar-section">
-            <div class="engine-sidebar-title">// Инструменты</div>
-            <button class="tool-btn active" id="tool-select" onclick="setTool('select')">
-                <span class="tool-btn-icon">↖</span> Выбор
-            </button>
-            <button class="tool-btn" id="tool-node" onclick="setTool('node')">
-                <span class="tool-btn-icon">☐</span> Добавить узел
-            </button>
-            <button class="tool-btn" id="tool-connect" onclick="setTool('connect')">
-                <span class="tool-btn-icon">⤢</span> Связь
-            </button>
-            <button class="tool-btn" onclick="duplicateSelectedNode()" data-plan="plus">
-                <span class="tool-btn-icon">⧉</span> Дублировать <span class="plan-badge">PLUS</span>
-            </button>
-            <button class="tool-btn" onclick="focusSelectedNode()">
-                <span class="tool-btn-icon">⌖</span> Фокус на узле
-            </button>
-        </div>
-
-        <div class="engine-sidebar-section">
-            <div class="engine-sidebar-title">// Действия</div>
-            <button class="tool-btn" onclick="autoLayout()">
-                <span class="tool-btn-icon">⬡</span> Авто-размещение
-            </button>
-            <button class="tool-btn" onclick="fitView()">
-                <span class="tool-btn-icon">⊡</span> Центрировать
-            </button>
-            <button class="tool-btn" onclick="highlightIsolatedNodes()">
-                <span class="tool-btn-icon">◇</span> Найти одиночные
-            </button>
-            <button class="tool-btn" id="smart-connect-btn" onclick="smartConnect()" data-plan="plus">
-                <span class="tool-btn-icon">⌁</span> Умные связи <span class="plan-badge">PLUS</span>
-            </button>
-            <button class="tool-btn" onclick="deleteSelected()" id="delete-btn" style="color:var(--accent2);display:none">
-                <span class="tool-btn-icon">✕</span> Удалить
-            </button>
-            <button class="tool-btn" onclick="exportSpaceJSON()">
-                <span class="tool-btn-icon">📋</span> Экспорт JSON
-            </button>
-            <button class="tool-btn" onclick="importSpaceJSON()">
-                <span class="tool-btn-icon">📥</span> Импорт JSON
-            </button>
-            <button class="tool-btn" onclick="toggleAIPanel()" data-plan="pro">
-                <span class="tool-btn-icon">AI</span> AI Помощник <span class="plan-badge">PRO</span>
-            </button>
-        </div>
-
-        <div class="engine-stats">
-            <div class="engine-sidebar-title">// Статистика</div>
-            <div class="engine-stat-row">
-                <span class="engine-stat-label">УЗЛЫ</span>
-                <span class="engine-stat-value" id="stat-nodes">0</span>
+        <div class="engine-sidebar-groups">
+            <div class="engine-group active" data-group="thinking">
+                <button class="engine-group-head" onclick="toggleSidebarSection('thinking')">
+                    <span class="engine-group-arrow">▼</span><span class="engine-group-icon">🧠</span><span class="engine-group-label">THINKING</span>
+                </button>
+                <div class="engine-group-body" id="group-thinking">
+                    <div class="quick-capture">
+                        <div class="engine-sidebar-title">// Quick Capture</div>
+                        <textarea id="quick-capture-input" class="quick-capture-input" placeholder="One thought per line..."></textarea>
+                        <div class="think-row">
+                            <button class="quick-capture-btn" onclick="quickCapture()"><span>+ CAPTURE</span></button>
+                            <button class="quick-capture-btn" onclick="runThinkingModeFromQuick()"><span>THINK</span></button>
+                        </div>
+                    </div>
+                    <div class="connection-suggestions" id="connection-suggestions">
+                        <div class="engine-sidebar-title">// Suggested Links</div>
+                        <div class="suggestion-empty">Select a node to see smart link ideas</div>
+                    </div>
+                </div>
             </div>
-            <div class="engine-stat-row">
-                <span class="engine-stat-label">СВЯЗИ</span>
-                <span class="engine-stat-value" id="stat-edges">0</span>
+
+            <div class="engine-group" data-group="editing">
+                <button class="engine-group-head" onclick="toggleSidebarSection('editing')">
+                    <span class="engine-group-arrow">▼</span><span class="engine-group-icon">✎</span><span class="engine-group-label">EDITING</span>
+                </button>
+                <div class="engine-group-body" id="group-editing">
+                    <div class="engine-sidebar-section">
+                        <button class="tool-btn active" id="tool-select" onclick="setTool('select')">
+                            <span class="tool-btn-icon">↖</span> Выбор
+                        </button>
+                        <button class="tool-btn" id="tool-node" onclick="setTool('node')">
+                            <span class="tool-btn-icon">☐</span> Добавить узел
+                        </button>
+                        <button class="tool-btn" id="tool-connect" onclick="setTool('connect')">
+                            <span class="tool-btn-icon">⤢</span> Связь
+                        </button>
+                        <button class="tool-btn" id="tool-cut" onclick="setTool('cut')">
+                            <span class="tool-btn-icon">⟋</span> Разрезать связь
+                        </button>
+                        <button class="tool-btn" id="btn-duplicate" onclick="duplicateSelectedNode()" data-plan="plus">
+                            <span class="tool-btn-icon">⧉</span> Дублировать <span class="plan-badge">PLUS</span>
+                        </button>
+                        <button class="tool-btn" onclick="deleteSelected()" id="delete-btn" style="color:var(--accent2);display:none">
+                            <span class="tool-btn-icon">✕</span> Удалить
+                        </button>
+                    </div>
+                </div>
             </div>
-            <div class="engine-stat-row">
-                <span class="engine-stat-label">ПЛОТНОСТЬ</span>
-                <span class="engine-stat-value" id="stat-density">0%</span>
+
+            <div class="engine-group" data-group="organize">
+                <button class="engine-group-head" onclick="toggleSidebarSection('organize')">
+                    <span class="engine-group-arrow">▼</span><span class="engine-group-icon">⛶</span><span class="engine-group-label">ORGANIZE</span>
+                </button>
+                <div class="engine-group-body" id="group-organize">
+                    <div class="engine-sidebar-section">
+                        <button class="tool-btn" id="btn-auto-layout" onclick="autoLayout()">
+                            <span class="tool-btn-icon">⬡</span> Авто-размещение
+                        </button>
+                        <button class="tool-btn" id="btn-focus-node" onclick="focusSelectedNode()">
+                            <span class="tool-btn-icon">⌖</span> Фокус на узле
+                        </button>
+                        <button class="tool-btn" id="btn-isolated" onclick="highlightIsolatedNodes()">
+                            <span class="tool-btn-icon">◇</span> Найти одиночные
+                        </button>
+                        <button class="tool-btn" id="smart-connect-btn" onclick="smartConnect()">
+                            <span class="tool-btn-icon">⌁</span> Умные связи <span class="plan-badge">PLUS</span>
+                        </button>
+                        <button class="tool-btn" id="btn-ai-panel" onclick="toggleAIPanel()">
+                            <span class="tool-btn-icon">AI</span> AI Помощник <span class="plan-badge">PRO</span>
+                        </button>
+                    </div>
+                </div>
             </div>
-            <div class="engine-stat-row">
-                <span class="engine-stat-label">PLAN</span>
-                <span class="engine-stat-value" id="stat-plan">Basic</span>
+
+            <div class="engine-group" data-group="view">
+                <button class="engine-group-head" onclick="toggleSidebarSection('view')">
+                    <span class="engine-group-arrow">▼</span><span class="engine-group-icon">◫</span><span class="engine-group-label">VIEW</span>
+                </button>
+                <div class="engine-group-body" id="group-view">
+                    <div class="engine-sidebar-section">
+                        <div class="view-mode-stack">
+                            <button class="view-mode-btn active" data-view="graph" onclick="setViewMode('graph')">Graph</button>
+                            <button class="view-mode-btn" data-view="list" onclick="setViewMode('list')">List</button>
+                            <button class="view-mode-btn" data-view="timeline" onclick="setViewMode('timeline')">Timeline</button>
+                            <button class="view-mode-btn" data-view="focus" onclick="setViewMode('focus')">Focus</button>
+                        </div>
+                        <div class="canvas-controls sidebar">
+                            <button class="canvas-ctrl-btn" onclick="zoom(1.2)">＋</button>
+                            <div class="canvas-zoom-label" id="zoom-label">100%</div>
+                            <button class="canvas-ctrl-btn" onclick="zoom(0.8)">－</button>
+                            <button class="canvas-ctrl-btn" onclick="fitView()" style="font-size:12px">⊡</button>
+                            <button class="canvas-ctrl-btn" id="snap-grid-toggle" onclick="toggleSnapGrid()">⌗</button>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="engine-stat-row">
-                <span class="engine-stat-label">USAGE</span>
-                <span class="engine-stat-value" id="stat-usage">0/0</span>
+
+            <div class="engine-group" data-group="history">
+                <button class="engine-group-head" onclick="toggleSidebarSection('history')">
+                    <span class="engine-group-arrow">▼</span><span class="engine-group-icon">↺</span><span class="engine-group-label">HISTORY</span>
+                </button>
+                <div class="engine-group-body" id="group-history">
+                    <div class="engine-sidebar-section">
+                        <button class="tool-btn" id="btn-undo" onclick="undoLastChange()"><span class="tool-btn-icon">↶</span> Undo</button>
+                        <button class="tool-btn" id="btn-snapshot" onclick="createVersionSnapshot()"><span class="tool-btn-icon">⧗</span> Snapshot</button>
+                        <button class="tool-btn" id="version-history-placeholder"><span class="tool-btn-icon">≣</span> Version History</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="engine-group collapsed" data-group="stats">
+                <button class="engine-group-head" onclick="toggleSidebarSection('stats')">
+                    <span class="engine-group-arrow">▶</span><span class="engine-group-icon">◌</span><span class="engine-group-label">STATS</span>
+                </button>
+                <div class="engine-group-body" id="group-stats">
+                    <div class="engine-stats">
+                        <div class="engine-sidebar-title">// Статистика</div>
+                        <div class="engine-stat-row">
+                            <span class="engine-stat-label">УЗЛЫ</span>
+                            <span class="engine-stat-value" id="stat-nodes">0</span>
+                        </div>
+                        <div class="engine-stat-row">
+                            <span class="engine-stat-label">СВЯЗИ</span>
+                            <span class="engine-stat-value" id="stat-edges">0</span>
+                        </div>
+                        <div class="engine-stat-row">
+                            <span class="engine-stat-label">ПЛОТНОСТЬ</span>
+                            <span class="engine-stat-value" id="stat-density">0%</span>
+                        </div>
+                        <div class="engine-stat-row">
+                            <span class="engine-stat-label">PLAN</span>
+                            <span class="engine-stat-value" id="stat-plan">Basic</span>
+                        </div>
+                        <div class="engine-stat-row">
+                            <span class="engine-stat-label">USAGE</span>
+                            <span class="engine-stat-value" id="stat-usage">0/0</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -197,10 +261,13 @@
         <div class="canvas-world" id="canvas-world">
             <svg class="edges-svg" id="main-edges-svg"></svg>
         </div>
+        <div class="structured-view" id="structured-view" style="display:none"></div>
 
         <svg id="temp-edge-container" style="position:absolute; inset:0; pointer-events:none; overflow:visible; width:100%; height:100%; z-index:1000;">
             <path id="temp-edge-path" d="" style="fill:none; stroke:var(--accent); stroke-width:2; stroke-dasharray:6 4; opacity:0.7; display:none;"></path>
+            <path id="cut-trail-path" class="cut-trail-path" d="" style="display:none;"></path>
         </svg>
+        <div class="selection-box" id="selection-box" style="display:none"></div>
 
         <div class="connect-mode-indicator" id="connect-indicator">
             ⚡ РЕЖИМ СВЯЗИ — Выберите целевой узел
@@ -211,16 +278,21 @@
             <div class="progress-text" id="progress-text">Анализ узлов...</div>
         </div>
 
-        <div class="canvas-controls">
-            <button class="canvas-ctrl-btn" onclick="zoom(1.2)">＋</button>
-            <div class="canvas-zoom-label" id="zoom-label">100%</div>
-            <button class="canvas-ctrl-btn" onclick="zoom(0.8)">－</button>
-            <button class="canvas-ctrl-btn" onclick="fitView()" style="font-size:12px">⊡</button>
+        <div class="canvas-minimap" id="canvas-minimap">
+            <div class="canvas-minimap-world" id="minimap-world"></div>
+            <div class="canvas-minimap-viewport" id="minimap-viewport"></div>
         </div>
             <!-- AI панель -->
             <div class="ai-panel" id="ai-panel">
                 <div class="node-editor-title">// AI Ассистент</div>
                      <button class="editor-close-btn" onclick="toggleAIPanel()" style="margin-bottom:16px;">× ЗАКРЫТЬ</button>
+                <textarea id="ai-prompt-input" class="ai-prompt-input" placeholder="Describe what you want to think through..."></textarea>
+                <div class="ai-action-grid">
+                    <button onclick="runThinkingModeFromAI()">Think</button>
+                    <button onclick="aiGenerateNodes()">Generate nodes</button>
+                    <button onclick="smartConnect()">Auto-link</button>
+                    <button onclick="renderAISummary()">Summary</button>
+                </div>
                 <div class="ai-response" id="ai-response-content">
         Нажмите кнопку 🧠 AI в боковой панели для анализа.
          </div>
@@ -260,7 +332,7 @@
 <!-- ===== SETTINGS ===== -->
 <div id="settings" class="page">
     <div class="settings-sidebar">
-        <div class="settings-sidebar-logo">NeuroSpace</div>
+        <div class="settings-sidebar-logo brand-logo"><span class="brand-mark"></span><span>Nodus AI</span></div>
         <div class="settings-nav-item active" onclick="setSettingsTab('appearance')">
             <span>AP</span> Внешний вид
         </div>

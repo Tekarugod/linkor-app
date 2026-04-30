@@ -1,4 +1,7 @@
 // ===== NEUROSPACE v2.1 FINAL =====
+const BRAND_NAME = 'Nodus AI';
+const BRAND_TAGLINE = 'thinking graph engine';
+
 let state = {
   users: {},
   currentUser: null,
@@ -11,9 +14,22 @@ let state = {
   language: 'uk',
   subscriptionPlan: 'basic',
   tool: 'select',
+  viewMode: 'graph',
   selectedNodeId: null,
+  selectedNodeIds: [],
   connectSource: null,
+  selecting: null,
+  cutting: null,
+  groupDragging: null,
+  history: [],
+  snapshots: [],
+  hasUnsyncedChanges: false,
+  isCloudLoading: false,
   view: { x: 0, y: 0, scale: 1 },
+  snapToGrid: false,
+  sidebarSections: { thinking: true, editing: true, organize: true, view: true, history: true, stats: false },
+  zoomMomentum: 0,
+  zoomAnchor: null,
   dragging: null,
   panning: false,
   panStart: null,
@@ -366,6 +382,7 @@ const I18N = {
     welcomeBack: 'Welcome back', accountCreated: 'Account created. Welcome', fillFields: 'Fill in all fields',
     wrongLogin: 'Wrong identifier or access code', userExists: 'A user with this email already exists',
     typeIdea: 'Idea', typeTask: 'Task', typeQuestion: 'Question', typeResource: 'Resource', typeDecision: 'Decision',
+    cutLink: 'Cut link', advancedData: 'Advanced data', currentSpaceData: 'Current space data',
     profileModalTitle: 'Profile', profileSpaces: 'Spaces', profileNodes: 'Nodes',
     matchByTags: 'Match by tags', inviteToSpaces: 'Invite to spaces', sharedGraphRooms: 'Shared graph rooms',
     hubMode: 'Hub mode', graphMemory: 'Graph memory', backup: 'Backup', safety: 'Safety',
@@ -378,6 +395,15 @@ const I18N = {
     aiIdea2: 'One important node has few links. Add intermediate tasks or context nodes around it.',
     aiIdea3: 'The graph is forming several directions. Consider turning mature clusters into separate spaces.',
     aiIdea4: 'Add priority tags to urgent nodes so filtering and search stay useful.'
+    ,think: 'Think', graphView: 'Graph', listView: 'List', timelineView: 'Timeline', focusView: 'Focus',
+    undo: 'Undo', snapshot: 'Snapshot', thinkingPlaceholder: 'Describe what you want to think through...',
+    generateNodes: 'Generate nodes', autoLink: 'Auto-link', summary: 'Summary', aiSummary: 'AI summary',
+    noHistory: 'No undo history yet', snapshotSaved: 'Snapshot saved', restoredSnapshot: 'Snapshot restored',
+    generatedNodes: 'Generated nodes', linksCreated: 'Links created', viewChanged: 'View changed',
+    thinkEmpty: 'Write a thought or goal first', restore: 'Restore', versionHistory: 'Version history',
+    createNodeCommand: 'Create node', connectNodesCommand: 'Connect nodes', zoomIn: 'Zoom in', zoomOut: 'Zoom out',
+    spaceSummaryIntro: 'This space has {nodes} nodes and {links} links. Main themes: {themes}.',
+    focusHint: 'Select a node to focus its cluster.'
   },
   uk: {
     login: 'Вхід', register: 'Реєстрація', identifier: 'Ідентифікатор', accessCode: 'Код доступу',
@@ -434,6 +460,7 @@ const I18N = {
     fillFields: 'Заповни всі поля', wrongLogin: 'Неправильний ідентифікатор або код доступу',
     userExists: 'Користувач з таким email вже існує',
     typeIdea: 'Ідея', typeTask: 'Задача', typeQuestion: 'Питання', typeResource: 'Ресурс', typeDecision: 'Рішення',
+    cutLink: 'Розрізати зв’язок', advancedData: 'Розширені дані', currentSpaceData: 'Дані поточного простору',
     profileModalTitle: 'Профіль', profileSpaces: 'Простори', profileNodes: 'Вузли',
     matchByTags: 'Збіг за тегами', inviteToSpaces: 'Запрошення у простори', sharedGraphRooms: 'Спільні кімнати графів',
     hubMode: 'Режим хабу', graphMemory: 'Пам’ять графа', backup: 'Бекап', safety: 'Безпека',
@@ -446,6 +473,15 @@ const I18N = {
     aiIdea2: 'Один важливий вузол має мало зв’язків. Додай навколо нього проміжні задачі або контекстні вузли.',
     aiIdea3: 'Граф формує кілька напрямів. Зрілі кластери можна винести в окремі простори.',
     aiIdea4: 'Додай теги пріоритету до термінових вузлів, щоб фільтрація й пошук лишалися корисними.'
+    ,think: 'Думати', graphView: 'Граф', listView: 'Список', timelineView: 'Таймлайн', focusView: 'Фокус',
+    undo: 'Скасувати', snapshot: 'Знімок', thinkingPlaceholder: 'Опиши думку, ціль або ідею...',
+    generateNodes: 'Створити вузли', autoLink: 'Автозв’язки', summary: 'Підсумок', aiSummary: 'AI-підсумок',
+    noHistory: 'Поки немає історії для скасування', snapshotSaved: 'Знімок збережено', restoredSnapshot: 'Знімок відновлено',
+    generatedNodes: 'Вузли створено', linksCreated: 'Зв’язки створено', viewChanged: 'Режим змінено',
+    thinkEmpty: 'Спочатку напиши думку або ціль', restore: 'Відновити', versionHistory: 'Історія версій',
+    createNodeCommand: 'Створити вузол', connectNodesCommand: 'З’єднати вузли', zoomIn: 'Наблизити', zoomOut: 'Віддалити',
+    spaceSummaryIntro: 'У цьому просторі {nodes} вузлів і {links} зв’язків. Основні теми: {themes}.',
+    focusHint: 'Вибери вузол, щоб сфокусувати його кластер.'
   },
   ru: {}
 };
@@ -508,6 +544,7 @@ I18N.ru = {
   accountCreated: 'Аккаунт создан. Добро пожаловать', fillFields: 'Заполните все поля',
   wrongLogin: 'Неверный идентификатор или код доступа', userExists: 'Пользователь с таким email уже существует',
   typeIdea: 'Идея', typeTask: 'Задача', typeQuestion: 'Вопрос', typeResource: 'Ресурс', typeDecision: 'Решение',
+  cutLink: 'Разрезать связь', advancedData: 'Расширенные данные', currentSpaceData: 'Данные текущего пространства',
   profileModalTitle: 'Профиль', profileSpaces: 'Пространства', profileNodes: 'Узлы',
   matchByTags: 'Совпадение по тегам', inviteToSpaces: 'Приглашение в пространства', sharedGraphRooms: 'Общие комнаты графов',
   hubMode: 'Режим хаба', graphMemory: 'Память графа', backup: 'Бэкап', safety: 'Безопасность',
@@ -520,6 +557,15 @@ I18N.ru = {
   aiIdea2: 'У одного важного узла мало связей. Добавьте вокруг него промежуточные задачи или контекстные узлы.',
   aiIdea3: 'Граф формирует несколько направлений. Зрелые кластеры можно вынести в отдельные пространства.',
   aiIdea4: 'Добавьте теги приоритета к срочным узлам, чтобы фильтрация и поиск оставались полезными.'
+  ,think: 'Думать', graphView: 'Граф', listView: 'Список', timelineView: 'Таймлайн', focusView: 'Фокус',
+  undo: 'Отменить', snapshot: 'Снимок', thinkingPlaceholder: 'Опишите мысль, цель или идею...',
+  generateNodes: 'Создать узлы', autoLink: 'Автосвязи', summary: 'Итог', aiSummary: 'AI-итог',
+  noHistory: 'Пока нет истории для отмены', snapshotSaved: 'Снимок сохранен', restoredSnapshot: 'Снимок восстановлен',
+  generatedNodes: 'Узлы созданы', linksCreated: 'Связи созданы', viewChanged: 'Режим изменен',
+  thinkEmpty: 'Сначала напишите мысль или цель', restore: 'Восстановить', versionHistory: 'История версий',
+  createNodeCommand: 'Создать узел', connectNodesCommand: 'Соединить узлы', zoomIn: 'Приблизить', zoomOut: 'Отдалить',
+  spaceSummaryIntro: 'В этом пространстве {nodes} узлов и {links} связей. Основные темы: {themes}.',
+  focusHint: 'Выберите узел, чтобы сфокусировать его кластер.'
 };
 
 const TYPE_I18N_KEYS = { idea: 'typeIdea', task: 'typeTask', question: 'typeQuestion', resource: 'typeResource', decision: 'typeDecision' };
@@ -567,6 +613,75 @@ function getDemoCopy() {
   return DEMO_I18N[currentLang()] || DEMO_I18N.uk;
 }
 
+function cloneGraphState() {
+  return {
+    spaces: JSON.parse(JSON.stringify(state.spaces)),
+    nodes: JSON.parse(JSON.stringify(state.nodes)),
+    edges: JSON.parse(JSON.stringify(state.edges)),
+    currentSpaceId: state.currentSpaceId,
+    nodeIdCounter: state.nodeIdCounter,
+    edgeIdCounter: state.edgeIdCounter,
+    spaceIdCounter: state.spaceIdCounter
+  };
+}
+
+function restoreGraphState(snapshot) {
+  if (!snapshot) return;
+  state.spaces = JSON.parse(JSON.stringify(snapshot.spaces || []));
+  state.nodes = JSON.parse(JSON.stringify(snapshot.nodes || {}));
+  state.edges = JSON.parse(JSON.stringify(snapshot.edges || {}));
+  state.currentSpaceId = snapshot.currentSpaceId || state.currentSpaceId;
+  state.nodeIdCounter = snapshot.nodeIdCounter || state.nodeIdCounter;
+  state.edgeIdCounter = snapshot.edgeIdCounter || state.edgeIdCounter;
+  state.spaceIdCounter = snapshot.spaceIdCounter || state.spaceIdCounter;
+  state.selectedNodeId = null;
+  state.connectSource = null;
+}
+
+function captureHistory(label = 'Change') {
+  state.history = state.history || [];
+  state.history.push({ label, at: Date.now(), data: cloneGraphState() });
+  if (state.history.length > 40) state.history.shift();
+}
+
+function undoLastChange() {
+  setActiveSidebarGroup('history');
+  const item = state.history?.pop();
+  if (!item) { showToast(tr('noHistory')); return; }
+  restoreGraphState(item.data);
+  saveState();
+  if (document.getElementById('hub')?.classList.contains('active')) renderHub();
+  if (document.getElementById('engine')?.classList.contains('active')) renderEngine();
+  showToast(`${tr('undo')}: ${item.label}`);
+}
+
+function createVersionSnapshot(label) {
+  setActiveSidebarGroup('history');
+  state.snapshots = state.snapshots || [];
+  const space = state.spaces.find(s => s.id === state.currentSpaceId);
+  state.snapshots.unshift({
+    id: 'vs_' + Date.now(),
+    label: label || (space ? space.name : tr('snapshot')),
+    at: Date.now(),
+    data: cloneGraphState()
+  });
+  state.snapshots = state.snapshots.slice(0, 12);
+  saveState();
+  showToast(`✓ ${tr('snapshotSaved')}`);
+  return state.snapshots[0];
+}
+
+function restoreVersionSnapshot(id) {
+  const snapshot = state.snapshots?.find(item => item.id === id);
+  if (!snapshot) return;
+  captureHistory(tr('restore'));
+  restoreGraphState(snapshot.data);
+  saveState();
+  if (document.getElementById('engine')?.classList.contains('active')) renderEngine();
+  if (document.getElementById('hub')?.classList.contains('active')) renderHub();
+  showToast(`✓ ${tr('restoredSnapshot')}`);
+}
+
 // ===== PERSISTENCE =====
 function loadState() {
   try {
@@ -582,15 +697,28 @@ function loadState() {
       state.accentColor = saved.accentColor || '#00f5ff';
       state.language = saved.language || 'uk';
       state.subscriptionPlan = saved.subscriptionPlan || 'basic';
+      state.viewMode = saved.viewMode || 'graph';
+      state.snapToGrid = Boolean(saved.snapToGrid);
+      state.sidebarSections = { thinking: true, editing: true, organize: true, view: true, history: true, stats: false, ...(saved.sidebarSections || {}) };
+      state.history = saved.history || [];
+      state.snapshots = saved.snapshots || [];
+      state.hasUnsyncedChanges = Boolean(saved.hasUnsyncedChanges);
       state.nodeIdCounter = saved.nodeIdCounter || 1;
       state.edgeIdCounter = saved.edgeIdCounter || 1;
       state.spaceIdCounter = saved.spaceIdCounter || 1;
     }
+    hydrateCurrentUserData();
   } catch(e) { console.error('Load error:', e); }
 }
 
-function saveState() {
+function saveState(options = {}) {
   try {
+    if (state.currentUser && !state.isCloudLoading && options.markUnsynced !== false) {
+      state.hasUnsyncedChanges = true;
+      setSyncStatus('unsynced', 'Local changes are not synced yet');
+    }
+
+    persistCurrentUserData();
     localStorage.setItem('neurospace_v2', JSON.stringify({
       users: state.users,
       currentUser: state.currentUser,
@@ -601,11 +729,61 @@ function saveState() {
       accentColor: state.accentColor,
       language: state.language,
       subscriptionPlan: state.subscriptionPlan,
+      viewMode: state.viewMode,
+      snapToGrid: state.snapToGrid,
+      sidebarSections: state.sidebarSections,
+      history: state.history,
+      snapshots: state.snapshots,
+      hasUnsyncedChanges: state.hasUnsyncedChanges,
       nodeIdCounter: state.nodeIdCounter,
       edgeIdCounter: state.edgeIdCounter,
       spaceIdCounter: state.spaceIdCounter,
     }));
   } catch(e) { console.error('Save error:', e); }
+}
+
+function hydrateCurrentUserData() {
+  if (!state.currentUser || !state.users[state.currentUser]) return;
+  const user = state.users[state.currentUser];
+  if (!user.data && (user.spaces || user.nodes || user.edges)) {
+    user.data = {
+      spaces: user.spaces || [],
+      nodes: user.nodes || {},
+      edges: user.edges || {},
+      nodeIdCounter: user.nodeIdCounter || 1,
+      edgeIdCounter: user.edgeIdCounter || 1,
+      spaceIdCounter: user.spaceIdCounter || 1
+    };
+  }
+  if (!user.data) {
+    user.data = {
+      spaces: [],
+      nodes: {},
+      edges: {},
+      nodeIdCounter: 1,
+      edgeIdCounter: 1,
+      spaceIdCounter: 1
+    };
+  }
+  state.spaces = user.data.spaces || [];
+  state.nodes = user.data.nodes || {};
+  state.edges = user.data.edges || {};
+  state.nodeIdCounter = user.data.nodeIdCounter || 1;
+  state.edgeIdCounter = user.data.edgeIdCounter || 1;
+  state.spaceIdCounter = user.data.spaceIdCounter || 1;
+}
+
+function persistCurrentUserData() {
+  if (!state.currentUser || !state.users[state.currentUser]) return;
+  const user = state.users[state.currentUser];
+  user.data = {
+    spaces: state.spaces,
+    nodes: state.nodes,
+    edges: state.edges,
+    nodeIdCounter: state.nodeIdCounter,
+    edgeIdCounter: state.edgeIdCounter,
+    spaceIdCounter: state.spaceIdCounter
+  };
 }
 
 // ===== NAVIGATION =====
@@ -614,11 +792,36 @@ function showPage(id) {
   const target = document.getElementById(id);
   if (target) target.classList.add('active');
   applyStaticTranslations();
-  if (id === 'hub') renderHub();
+  if (id === 'hub') {
+    renderHub();
+    loadAppVersion();
+  }
   if (id === 'engine') renderEngine();
   if (id === 'settings') {
     setSettingsTab('appearance');
     renderSettings('appearance');
+  }
+}
+
+async function loadAppVersion() {
+  const el = document.getElementById('app-version');
+  if (!el) return;
+
+  try {
+    const version = await window.nodusBridge?.getAppVersion?.();
+    if (version) el.textContent = `v${version}`;
+  } catch (error) {
+    console.warn('Version load failed:', error);
+  }
+}
+
+async function checkForUpdates() {
+  try {
+    const result = await window.nodusBridge?.checkForUpdates?.();
+    showToast(result?.message || 'Не вдалося перевірити оновлення');
+  } catch (error) {
+    console.warn('Update check failed:', error);
+    showToast(`Не вдалося перевірити оновлення: ${error.message}`);
   }
 }
 
@@ -639,6 +842,9 @@ function setPlaceholder(selector, value) {
 
 function applyStaticTranslations() {
   document.documentElement.lang = state.language || 'uk';
+  document.title = `${BRAND_NAME} — Thinking Graph`;
+  document.querySelectorAll('.brand-logo span:last-child').forEach(el => { el.textContent = BRAND_NAME; });
+  setText('.gate-subtitle', `// ${BRAND_TAGLINE}`);
   setText('.gate-tabs .gate-tab:nth-child(1)', tr('login'));
   setText('.gate-tabs .gate-tab:nth-child(2)', tr('register'));
   setText('#login-form .gate-input-group:nth-child(1) .gate-label', tr('identifier'));
@@ -650,7 +856,6 @@ function applyStaticTranslations() {
   setText('#register-form .gate-btn span', tr('createAccount'));
   setText('.hub-nav-btn.plan', tr('plans'));
   setText('.hub-nav-btn.locked', tr('friends'));
-  setText('.hub-nav-btn[href="#"]', tr('export'));
   setText('.hub-nav-btn[onclick*="settings"]', tr('settings'));
   setText('.hub-logout-btn', tr('logout'));
   setText('.hub-kicker', tr('commandCenter'));
@@ -662,28 +867,26 @@ function applyStaticTranslations() {
   setPlaceholder('#node-search', tr('searchNodes'));
   setText('.quick-capture .engine-sidebar-title', `// ${tr('quickCapture')}`);
   setPlaceholder('#quick-capture-input', tr('quickPlaceholder'));
-  setText('.quick-capture-btn span', tr('capture'));
+  const quickButtons = document.querySelectorAll('.quick-capture-btn span');
+  if (quickButtons[0]) quickButtons[0].textContent = tr('capture');
+  if (quickButtons[1]) quickButtons[1].textContent = tr('think');
   setText('#connection-suggestions .engine-sidebar-title', `// ${tr('suggestedLinks')}`);
   const suggestionEmpty = document.querySelector('#connection-suggestions .suggestion-empty');
   if (suggestionEmpty) suggestionEmpty.textContent = tr('suggestEmpty');
-  const sidebarTitles = document.querySelectorAll('.engine-sidebar-section .engine-sidebar-title, .engine-stats .engine-sidebar-title');
-  if (sidebarTitles[0]) sidebarTitles[0].textContent = `// ${tr('tools')}`;
-  if (sidebarTitles[1]) sidebarTitles[1].textContent = `// ${tr('actions')}`;
-  if (sidebarTitles[2]) sidebarTitles[2].textContent = `// ${tr('stats')}`;
+  setText('#group-stats .engine-sidebar-title', `// ${tr('stats')}`);
   setHtml('#tool-select', `<span class="tool-btn-icon">↖</span> ${tr('select')}`);
   setHtml('#tool-node', `<span class="tool-btn-icon">☐</span> ${tr('addNode')}`);
   setHtml('#tool-connect', `<span class="tool-btn-icon">⤢</span> ${tr('connect')}`);
-  const buttons = document.querySelectorAll('.engine-sidebar .tool-btn');
-  if (buttons[3]) buttons[3].innerHTML = `<span class="tool-btn-icon">⧉</span> ${tr('duplicate')} <span class="plan-badge">PLUS</span>`;
-  if (buttons[4]) buttons[4].innerHTML = `<span class="tool-btn-icon">⌖</span> ${tr('focusNode')}`;
-  if (buttons[5]) buttons[5].innerHTML = `<span class="tool-btn-icon">⬡</span> ${tr('autoLayout')}`;
-  if (buttons[6]) buttons[6].innerHTML = `<span class="tool-btn-icon">⊡</span> ${tr('fitView')}`;
-  if (buttons[7]) buttons[7].innerHTML = `<span class="tool-btn-icon">◇</span> ${tr('isolated')}`;
-  if (buttons[8]) buttons[8].innerHTML = `<span class="tool-btn-icon">⌁</span> ${tr('smartLinks')} <span class="plan-badge">PLUS</span>`;
-  if (buttons[9]) buttons[9].innerHTML = `<span class="tool-btn-icon">✕</span> ${tr('delete')}`;
-  if (buttons[10]) buttons[10].innerHTML = `<span class="tool-btn-icon">JSON</span> ${tr('exportJson')}`;
-  if (buttons[11]) buttons[11].innerHTML = `<span class="tool-btn-icon">IN</span> ${tr('importJson')}`;
-  if (buttons[12]) buttons[12].innerHTML = `<span class="tool-btn-icon">AI</span> ${tr('aiAssistant')} <span class="plan-badge">PRO</span>`;
+  setHtml('#tool-cut', `<span class="tool-btn-icon">⟋</span> ${tr('cutLink')}`);
+  setHtml('#btn-duplicate', `<span class="tool-btn-icon">⧉</span> ${tr('duplicate')} <span class="plan-badge">PLUS</span>`);
+  setHtml('#btn-focus-node', `<span class="tool-btn-icon">⌖</span> ${tr('focusNode')}`);
+  setHtml('#btn-auto-layout', `<span class="tool-btn-icon">⬡</span> ${tr('autoLayout')}`);
+  setHtml('#btn-isolated', `<span class="tool-btn-icon">◇</span> ${tr('isolated')}`);
+  setHtml('#smart-connect-btn', `<span class="tool-btn-icon">⌁</span> ${tr('smartLinks')} <span class="plan-badge">PLUS</span>`);
+  setHtml('#delete-btn', `<span class="tool-btn-icon">✕</span> ${tr('delete')}`);
+  setHtml('#btn-ai-panel', `<span class="tool-btn-icon">AI</span> ${tr('aiAssistant')} <span class="plan-badge">PRO</span>`);
+  setHtml('#btn-undo', `<span class="tool-btn-icon">↶</span> ${tr('undo')}`);
+  setHtml('#btn-snapshot', `<span class="tool-btn-icon">⧗</span> ${tr('snapshot')}`);
   const statLabels = document.querySelectorAll('.engine-stat-label');
   [tr('nodes'), tr('links'), tr('density'), tr('plan'), tr('usage')].forEach((label, i) => {
     if (statLabels[i]) statLabels[i].textContent = label.toUpperCase();
@@ -692,6 +895,15 @@ function applyStaticTranslations() {
   setText('#progress-text', tr('analyzingNodes'));
   setText('#ai-panel .node-editor-title', `// ${tr('aiAssistant')}`);
   setText('#ai-panel .editor-close-btn', `× ${tr('close')}`);
+  setPlaceholder('#ai-prompt-input', tr('thinkingPlaceholder'));
+  const aiButtons = document.querySelectorAll('.ai-action-grid button');
+  [tr('think'), tr('generateNodes'), tr('autoLink'), tr('summary')].forEach((label, i) => {
+    if (aiButtons[i]) aiButtons[i].textContent = label;
+  });
+  const viewButtons = document.querySelectorAll('#group-view .view-mode-btn');
+  [tr('graphView'), tr('listView'), tr('timelineView'), tr('focusView')].forEach((label, i) => {
+    if (viewButtons[i]) viewButtons[i].textContent = label;
+  });
   setText('#node-editor .node-editor-title', `// ${tr('nodeEditor')}`);
   const editorLabels = document.querySelectorAll('#node-editor .editor-label');
   [tr('title'), tr('description'), tr('tags'), tr('nodeType'), tr('color'), tr('connectedNodes')].forEach((label, i) => {
@@ -714,6 +926,87 @@ function applyStaticTranslations() {
   updatePlanBadges();
 }
 
+function snapValue(value, step = 30) {
+  return Math.round(value / step) * step;
+}
+
+function toggleSnapGrid() {
+  state.snapToGrid = !state.snapToGrid;
+  const toggle = document.getElementById('snap-grid-toggle');
+  if (toggle) toggle.classList.toggle('active', state.snapToGrid);
+  saveState();
+  showToast(state.snapToGrid ? 'Snap grid: ON' : 'Snap grid: OFF');
+}
+
+function toggleSidebarSection(section) {
+  const group = document.querySelector(`.engine-group[data-group="${section}"]`);
+  if (!group) return;
+  const collapsed = group.classList.toggle('collapsed');
+  const arrow = group.querySelector('.engine-group-arrow');
+  if (arrow) arrow.textContent = collapsed ? '▶' : '▼';
+  state.sidebarSections = state.sidebarSections || {};
+  state.sidebarSections[section] = !collapsed;
+  if (!collapsed) setActiveSidebarGroup(section);
+  saveState();
+}
+
+function setActiveSidebarGroup(section) {
+  document.querySelectorAll('.engine-group').forEach(group => {
+    group.classList.toggle('active', group.dataset.group === section);
+  });
+}
+
+function applySidebarState() {
+  const defaults = { thinking: true, editing: true, organize: true, view: true, history: true, stats: false };
+  state.sidebarSections = { ...defaults, ...(state.sidebarSections || {}) };
+  Object.entries(state.sidebarSections).forEach(([section, open]) => {
+    const group = document.querySelector(`.engine-group[data-group="${section}"]`);
+    if (!group) return;
+    group.classList.toggle('collapsed', !open);
+    const arrow = group.querySelector('.engine-group-arrow');
+    if (arrow) arrow.textContent = open ? '▼' : '▶';
+  });
+}
+
+function renderMiniMap() {
+  const map = document.getElementById('canvas-minimap');
+  const world = document.getElementById('minimap-world');
+  const viewport = document.getElementById('minimap-viewport');
+  const wrap = document.getElementById('canvas-wrap');
+  if (!map || !world || !viewport || !wrap) return;
+  const nodes = getSpaceNodes();
+  world.innerHTML = '';
+  if (!nodes.length) {
+    viewport.style.display = 'none';
+    return;
+  }
+  const minX = Math.min(...nodes.map(n => n.x));
+  const minY = Math.min(...nodes.map(n => n.y));
+  const maxX = Math.max(...nodes.map(n => n.x + 160));
+  const maxY = Math.max(...nodes.map(n => n.y + 80));
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const sx = 180 / width;
+  const sy = 120 / height;
+  nodes.forEach(node => {
+    const dot = document.createElement('div');
+    dot.className = 'minimap-node';
+    dot.style.left = `${(node.x - minX) * sx}px`;
+    dot.style.top = `${(node.y - minY) * sy}px`;
+    world.appendChild(dot);
+  });
+  const rect = wrap.getBoundingClientRect();
+  const visibleLeft = -state.view.x / state.view.scale;
+  const visibleTop = -state.view.y / state.view.scale;
+  const visibleWidth = rect.width / state.view.scale;
+  const visibleHeight = rect.height / state.view.scale;
+  viewport.style.display = '';
+  viewport.style.left = `${(visibleLeft - minX) * sx}px`;
+  viewport.style.top = `${(visibleTop - minY) * sy}px`;
+  viewport.style.width = `${Math.max(8, visibleWidth * sx)}px`;
+  viewport.style.height = `${Math.max(8, visibleHeight * sy)}px`;
+}
+
 // ===== AUTH =====
 function switchTab(tab) {
   document.querySelectorAll('.gate-tab').forEach((t, i) => {
@@ -725,40 +1018,151 @@ function switchTab(tab) {
   document.getElementById('reg-error').textContent = '';
 }
 
-function doLogin() {
+async function doLogin() {
   const email = document.getElementById('login-email').value.trim();
   const pass = document.getElementById('login-pass').value;
   const errEl = document.getElementById('login-error');
-  if (!email || !pass) { errEl.textContent = `⚠ ${tr('fillFields')}`; return; }
-  const user = state.users[email];
-  if (!user || user.pass !== pass) { errEl.textContent = `⚠ ${tr('wrongLogin')}`; return; }
-  state.currentUser = email;
-  saveState();
-  showPage('hub');
-  showToast(`✓ ${tr('welcomeBack')}, ${user.nick}`);
+
+  if (!email || !pass) {
+    errEl.textContent = `⚠ ${tr('fillFields')}`;
+    return;
+  }
+
+  errEl.textContent = 'Connecting to Supabase...';
+
+  try {
+    const result = window.nodusBridge?.authLogin
+      ? await window.nodusBridge.authLogin({ email, password: pass })
+      : { ok: false, error: 'Supabase bridge is unavailable' };
+
+    if (result?.ok) {
+      const nick = result.user?.nick || email.split('@')[0];
+
+      if (!state.users[email]) {
+        state.users[email] = {
+          nick,
+          pass: '',
+          supabaseId: result.user?.id,
+          createdAt: Date.now(),
+          data: {
+            spaces: [],
+            nodes: {},
+            edges: {},
+            nodeIdCounter: 0,
+            edgeIdCounter: 0,
+            spaceIdCounter: 0
+          }
+        };
+      }
+
+      state.users[email].nick = nick;
+      state.users[email].supabaseId = result.user?.id;
+      state.currentUser = email;
+      hydrateCurrentUserData();
+
+      if (typeof loadCurrentUserFromSupabase === 'function') {
+        await loadCurrentUserFromSupabase();
+      }
+
+      saveState({ markUnsynced: false });
+      showPage('hub');
+      showToast(`✓ ${tr('welcomeBack')}, ${nick}`);
+      return;
+    }
+
+    const localUser = state.users[email];
+    if (localUser?.pass && localUser.pass === pass) {
+      state.currentUser = email;
+      hydrateCurrentUserData();
+      saveState();
+      showPage('hub');
+      showToast(`Supabase login failed: ${result?.error || 'Unknown error'}`);
+      showToast(`✓ ${tr('welcomeBack')}, ${localUser.nick}`);
+      return;
+    }
+
+    errEl.textContent = `⚠ ${result?.error || tr('wrongLogin')}`;
+  } catch (error) {
+    const localUser = state.users[email];
+    if (localUser?.pass && localUser.pass === pass) {
+      state.currentUser = email;
+      hydrateCurrentUserData();
+      saveState();
+      showPage('hub');
+      showToast(`Supabase login failed: ${error.message}`);
+      showToast(`✓ ${tr('welcomeBack')}, ${localUser.nick}`);
+      return;
+    }
+
+    errEl.textContent = `⚠ Supabase login failed: ${error.message}`;
+  }
 }
 
-function doRegister() {
+async function doRegister() {
   const nick = document.getElementById('reg-nick').value.trim();
   const email = document.getElementById('reg-email').value.trim() || (nick + '@neurospace.io');
   const pass = document.getElementById('reg-pass').value;
   const errEl = document.getElementById('reg-error');
-  if (!nick || !pass) { errEl.textContent = `⚠ ${tr('fillFields')}`; return; }
-  if (state.users[email]) { errEl.textContent = `⚠ ${tr('userExists')}`; return; }
-  state.users[email] = { nick, pass, createdAt: Date.now() };
-  state.currentUser = email;
-  if (state.spaces.length === 0) {
-    createDemoData();
+
+  if (!nick || !pass) {
+    errEl.textContent = `⚠ ${tr('fillFields')}`;
+    return;
   }
-  saveState();
-  showPage('hub');
-  showToast(`✓ ${tr('accountCreated')}, ${nick}`);
+
+  errEl.textContent = 'Creating account...';
+
+  try {
+    const result = window.nodusBridge?.authRegister
+      ? await window.nodusBridge.authRegister({ email, password: pass, nick })
+      : { ok: false, error: 'Supabase bridge is unavailable' };
+
+    if (!result?.ok) {
+      errEl.textContent = `⚠ ${result?.error || 'Supabase registration failed'}`;
+      return;
+    }
+
+    state.users[email] = state.users[email] || {};
+    state.users[email].nick = nick;
+    state.users[email].pass = '';
+    state.users[email].supabaseId = result.user?.id;
+    state.users[email].createdAt = state.users[email].createdAt || Date.now();
+    state.users[email].data = state.users[email].data || {
+      spaces: [],
+      nodes: {},
+      edges: {},
+      nodeIdCounter: 0,
+      edgeIdCounter: 0,
+      spaceIdCounter: 0
+    };
+
+    state.currentUser = email;
+    hydrateCurrentUserData();
+
+    if (!state.spaces.length) {
+      createDemoData();
+    }
+
+    saveState();
+    showPage('hub');
+    showToast(`✓ ${tr('accountCreated')}, ${nick}`);
+  } catch (error) {
+    errEl.textContent = `⚠ Supabase registration failed: ${error.message}`;
+  }
 }
 
-function doLogout() {
+async function doLogout() {
+  persistCurrentUserData();
+
+  if (window.nodusBridge?.authLogout) {
+    await window.nodusBridge.authLogout();
+  }
+
   state.currentUser = null;
   state.selectedNodeId = null;
   state.connectSource = null;
+  state.spaces = [];
+  state.nodes = {};
+  state.edges = {};
   saveState();
   showPage('gate');
 }
@@ -841,6 +1245,12 @@ function showPlanLimit(type) {
 function renderHub() {
   if (!state.currentUser) return;
   const user = state.users[state.currentUser];
+  if (!user) {
+    state.currentUser = null;
+    showPage('gate');
+    return;
+  }
+
   document.getElementById('hub-username').textContent = user.nick;
   document.getElementById('hub-avatar').textContent = user.nick.substring(0, 2).toUpperCase();
   applyAccentColor();
@@ -858,8 +1268,9 @@ function renderHub() {
   }
   const query = document.getElementById('hub-search')?.value.trim().toLowerCase() || '';
   const grid = document.getElementById('spaces-grid');
+  if (!grid) return;
   grid.innerHTML = '';
-  const spaces = state.spaces.filter(space => space.name.toLowerCase().includes(query));
+  const spaces = state.spaces.filter(space => (space.name || '').toLowerCase().includes(query));
   spaces.forEach(space => {
     const { nodeCount, edgeCount, density } = getSpaceStats(space.id);
     const card = document.createElement('div');
@@ -894,6 +1305,7 @@ function renderHub() {
 function deleteSpace(e, id) {
   e.stopPropagation();
   if (!confirm(tr('deleteSpaceConfirm'))) return;
+  captureHistory(tr('delete'));
   state.spaces = state.spaces.filter(s => s.id !== id);
   Object.keys(state.nodes).forEach(k => { if (state.nodes[k].spaceId === id) delete state.nodes[k]; });
   Object.keys(state.edges).forEach(k => { if (state.edges[k].spaceId === id) delete state.edges[k]; });
@@ -1123,6 +1535,7 @@ function createSpace() {
     showPlanLimit('links');
     return;
   }
+  captureHistory(tr('newSpace'));
   const space = { id: 'sp_' + (++state.spaceIdCounter), name, icon: newSpaceEmoji, color: newSpaceColor };
   state.spaces.unshift(space);
   createTemplateContent(space.id, newSpaceTemplate);
@@ -1184,8 +1597,13 @@ function renderEngine() {
   const searchInput = document.getElementById('node-search');
   if (searchInput) searchInput.value = '';
   setTool('select');
+  updateViewModeButtons();
   renderCanvas();
   applyView();
+  applySidebarState();
+  const snapToggle = document.getElementById('snap-grid-toggle');
+  if (snapToggle) snapToggle.classList.toggle('active', state.snapToGrid);
+  setActiveSidebarGroup('thinking');
   updatePlanBadges();
 }
 
@@ -1199,12 +1617,84 @@ function getSpaceEdges() {
 function renderCanvas() {
   const world = document.getElementById('canvas-world');
   if (!world) return;
+  const structured = document.getElementById('structured-view');
+  const graphMode = state.viewMode === 'graph' || state.viewMode === 'focus';
+  world.style.display = graphMode ? '' : 'none';
+  const grid = document.getElementById('grid-svg');
+  if (grid) grid.style.display = graphMode ? '' : 'none';
+  if (structured) structured.style.display = graphMode ? 'none' : '';
   world.querySelectorAll('.node').forEach(n => n.remove());
-  const nodes = getSpaceNodes();
+  const nodes = getVisibleNodes();
   nodes.forEach(node => world.appendChild(createNodeEl(node)));
   renderEdges();
+  renderStructuredView();
   updateStats();
   renderConnectionSuggestions(state.selectedNodeId);
+  renderMiniMap();
+}
+
+function getFocusedNodeIds() {
+  if (state.viewMode !== 'focus') return null;
+  if (!state.selectedNodeId || !state.nodes[state.selectedNodeId]) return new Set();
+  const ids = new Set([state.selectedNodeId]);
+  getSpaceEdges().forEach(edge => {
+    if (edge.from === state.selectedNodeId) ids.add(edge.to);
+    if (edge.to === state.selectedNodeId) ids.add(edge.from);
+  });
+  return ids;
+}
+
+function getVisibleNodes() {
+  const nodes = getSpaceNodes();
+  const focused = getFocusedNodeIds();
+  return focused ? nodes.filter(node => focused.has(node.id)) : nodes;
+}
+
+function updateViewModeButtons() {
+  document.querySelectorAll('.view-mode-btn[data-view]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === state.viewMode);
+  });
+}
+
+function setViewMode(mode) {
+  if (!['graph', 'list', 'timeline', 'focus'].includes(mode)) return;
+  state.viewMode = mode;
+  setActiveSidebarGroup('view');
+  updateViewModeButtons();
+  renderCanvas();
+  saveState();
+  if (mode === 'focus' && !state.selectedNodeId) showToast(tr('focusHint'));
+  else showToast(`${tr('viewChanged')}: ${tr(mode + 'View')}`);
+}
+
+function renderStructuredView() {
+  const panel = document.getElementById('structured-view');
+  if (!panel || state.viewMode === 'graph' || state.viewMode === 'focus') return;
+  const nodes = getSpaceNodes();
+  if (state.viewMode === 'list') {
+    panel.innerHTML = `<div class="structured-grid">${nodes.map(node => `
+      <button class="structured-card" onclick="selectNode('${node.id}');setViewMode('graph');focusSelectedNode()">
+        <div class="structured-card-title">${escHtml(node.title)}</div>
+        <div class="structured-card-meta">${escHtml(typeLabel(node.type || 'idea'))} · ${escHtml(node.tags || tr('tagsNone'))}</div>
+        ${node.desc ? `<div class="structured-card-desc">${escHtml(node.desc)}</div>` : ''}
+      </button>
+    `).join('')}</div>`;
+  } else if (state.viewMode === 'timeline') {
+    const ordered = [...nodes].sort((a, b) => {
+      const aTask = (a.type === 'task' || /task|зада|дія|крок|next|plan|етап/i.test(`${a.title} ${a.tags}`)) ? 0 : 1;
+      const bTask = (b.type === 'task' || /task|зада|дія|крок|next|plan|етап/i.test(`${b.title} ${b.tags}`)) ? 0 : 1;
+      return aTask - bTask || (a.y || 0) - (b.y || 0);
+    });
+    panel.innerHTML = `<div class="timeline-list">${ordered.map(node => `
+      <button class="timeline-item" onclick="selectNode('${node.id}');setViewMode('graph');focusSelectedNode()">
+        <span class="timeline-dot"></span>
+        <span class="timeline-body">
+          <span class="structured-card-title">${escHtml(node.title)}</span>
+          <span class="structured-card-desc">${escHtml(node.desc || node.tags || typeLabel(node.type || 'idea'))}</span>
+        </span>
+      </button>
+    `).join('')}</div>`;
+  }
 }
 
 function createNodeEl(node) {
@@ -1217,7 +1707,7 @@ function createNodeEl(node) {
   div.style.top = node.y + 'px';
   div.style.background = colorSet.bg;
   div.style.borderColor = colorSet.dot;
-  if (node.id === state.selectedNodeId) div.classList.add('selected');
+  if (getSelectedNodeIds().includes(node.id)) div.classList.add('selected');
   const tagsHtml = node.tags ? node.tags.split(',').map(t => `<span class="node-tag">${escHtml(t.trim())}</span>`).join('') : '';
   div.innerHTML = `
     <div class="node-in-handle" data-node="${node.id}"></div>
@@ -1247,7 +1737,9 @@ function renderEdges() {
   if (!svg) return;
   svg.innerHTML = '';
   const edges = getSpaceEdges();
+  const visibleIds = getFocusedNodeIds();
   edges.forEach(edge => {
+    if (visibleIds && (!visibleIds.has(edge.from) || !visibleIds.has(edge.to))) return;
     const fromNode = state.nodes[edge.from];
     const toNode = state.nodes[edge.to];
     if (!fromNode || !toNode) return;
@@ -1268,6 +1760,7 @@ function renderEdges() {
     path.setAttribute('data-edge', edge.id);
     path.addEventListener('click', () => {
       if (confirm(tr('deleteLinkConfirm'))) {
+        captureHistory(tr('delete'));
         delete state.edges[edge.id];
         saveState();
         renderCanvas();
@@ -1283,31 +1776,38 @@ function onNodeMouseDown(e, nodeId) {
   if (e.target.tagName === 'BUTTON') return;
   if (e.target.classList.contains('node-connect-handle')) return;
   e.stopPropagation();
+  if (state.tool === 'cut') return;
   if (state.tool === 'connect') {
     if (state.connectSource && state.connectSource !== nodeId) { finishConnect(nodeId); }
     else { startConnect(nodeId, e); }
     return;
   }
-  selectNode(nodeId);
-  const node = state.nodes[nodeId];
+  if (!getSelectedNodeIds().includes(nodeId)) selectNode(nodeId, e.shiftKey || e.ctrlKey || e.metaKey);
+  const selectedIds = getSelectedNodeIds().includes(nodeId) ? getSelectedNodeIds() : [nodeId];
+  const startPositions = Object.fromEntries(selectedIds.map(id => [id, { x: state.nodes[id].x, y: state.nodes[id].y }]));
   const startX = e.clientX;
   const startY = e.clientY;
-  const startNX = node.x;
-  const startNY = node.y;
+  captureHistory(tr('focusNode'));
   state.dragging = nodeId;
-  document.getElementById('node-' + nodeId)?.classList.add('dragging');
+  selectedIds.forEach(id => document.getElementById('node-' + id)?.classList.add('dragging'));
   const onMove = (ev) => {
     const dx = (ev.clientX - startX) / state.view.scale;
     const dy = (ev.clientY - startY) / state.view.scale;
-    node.x = startNX + dx;
-    node.y = startNY + dy;
-    const el = document.getElementById('node-' + nodeId);
-    if (el) { el.style.left = node.x + 'px'; el.style.top = node.y + 'px'; }
+    selectedIds.forEach(id => {
+      const node = state.nodes[id];
+      if (!node || !startPositions[id]) return;
+      const nextX = startPositions[id].x + dx;
+      const nextY = startPositions[id].y + dy;
+      node.x = state.snapToGrid ? snapValue(nextX) : nextX;
+      node.y = state.snapToGrid ? snapValue(nextY) : nextY;
+      const el = document.getElementById('node-' + id);
+      if (el) { el.style.left = node.x + 'px'; el.style.top = node.y + 'px'; }
+    });
     renderEdges();
   };
   const onUp = () => {
     state.dragging = null;
-    document.getElementById('node-' + nodeId)?.classList.remove('dragging');
+    selectedIds.forEach(id => document.getElementById('node-' + id)?.classList.remove('dragging'));
     saveState();
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
@@ -1322,6 +1822,7 @@ function applyView() {
   world.style.transform = `translate(${state.view.x}px, ${state.view.y}px) scale(${state.view.scale})`;
   const zoomLabel = document.getElementById('zoom-label');
   if (zoomLabel) zoomLabel.textContent = Math.round(state.view.scale * 100) + '%';
+  renderMiniMap();
 }
 
 function zoom(factor, cx, cy) {
@@ -1361,13 +1862,17 @@ function fitView() {
 // ===== TOOLS =====
 function setTool(tool) {
   state.tool = tool;
-  ['select','node','connect'].forEach(t => {
+  setActiveSidebarGroup('editing');
+  ['select','node','connect','cut'].forEach(t => {
     const btn = document.getElementById('tool-' + t);
     if (btn) btn.classList.toggle('active', t === tool);
   });
   if (tool !== 'connect') cancelConnect();
   const wrap = document.getElementById('canvas-wrap');
-  if (wrap) wrap.style.cursor = tool === 'node' ? 'crosshair' : 'default';
+  if (wrap) {
+    wrap.style.cursor = tool === 'node' ? 'crosshair' : tool === 'cut' ? 'crosshair' : 'default';
+    wrap.classList.toggle('cut-cursor', tool === 'cut');
+  }
 }
 
 function addNodeAt(e) {
@@ -1376,32 +1881,37 @@ function addNodeAt(e) {
   const rect = wrap.getBoundingClientRect();
   const x = (e.clientX - rect.left - state.view.x) / state.view.scale;
   const y = (e.clientY - rect.top - state.view.y) / state.view.scale;
-  createNode(x - 70, y - 30, tr('typeIdea'), '');
+  const nx = state.snapToGrid ? snapValue(x - 70) : (x - 70);
+  const ny = state.snapToGrid ? snapValue(y - 30) : (y - 30);
+  createNode(nx, ny, tr('typeIdea'), '');
 }
 
-function createNode(x, y, title, desc, colorIdx, type = 'idea') {
+function createNode(x, y, title, desc, colorIdx, type = 'idea', options = {}) {
   if (!canUsePlanResource('nodes', getHubMetrics().totalNodes + 1)) {
     showPlanLimit('nodes');
     return null;
   }
+  if (!options.skipHistory) captureHistory(tr('addNode'));
   const id = 'n_' + (++state.nodeIdCounter);
+  const nodeX = state.snapToGrid ? snapValue(x) : x;
+  const nodeY = state.snapToGrid ? snapValue(y) : y;
   state.nodes[id] = {
     id,
     spaceId: state.currentSpaceId,
-    x,
-    y,
+    x: nodeX,
+    y: nodeY,
     title: title || tr('typeIdea'),
     desc: desc || '',
     tags: '',
     colorIdx: colorIdx || 0,
     type
   };
-  saveState();
+  if (!options.skipSave) saveState();
   const world = document.getElementById('canvas-world');
   if (world) world.appendChild(createNodeEl(state.nodes[id]));
   updateStats();
   selectNode(id);
-  showToast(`✓ ${tr('addNode')}`);
+  if (!options.silent) showToast(`✓ ${tr('addNode')}`);
   return id;
 }
 
@@ -1454,12 +1964,12 @@ function addSubnode(e, parentId) {
   e.stopPropagation();
   const parent = state.nodes[parentId];
   if (!parent) return;
-  const id = createNode(parent.x + 200, parent.y, tr('subnode').replace('+', ''), '');
-  if (!id) return;
   if (!canUsePlanResource('links', getHubMetrics().totalEdges + 1)) {
     showPlanLimit('links');
     return;
   }
+  const id = createNode(parent.x + 200, parent.y, tr('subnode').replace('+', ''), '');
+  if (!id) return;
   const eid = 'e_' + (++state.edgeIdCounter);
   state.edges[eid] = { id: eid, spaceId: state.currentSpaceId, from: parentId, to: id };
   saveState();
@@ -1512,6 +2022,7 @@ function highlightIsolatedNodes() {
 
 function deleteNode(e, nodeId) {
   e.stopPropagation();
+  captureHistory(tr('delete'));
   delete state.nodes[nodeId];
   Object.keys(state.edges).forEach(eid => {
     const edge = state.edges[eid];
@@ -1525,9 +2036,22 @@ function deleteNode(e, nodeId) {
 }
 
 function deleteSelected() {
-  if (state.selectedNodeId) {
-    deleteNode({ stopPropagation: ()=>{} }, state.selectedNodeId);
-  }
+  const ids = getSelectedNodeIds();
+  if (!ids.length) return;
+  captureHistory(tr('delete'));
+  ids.forEach(nodeId => {
+    delete state.nodes[nodeId];
+    Object.keys(state.edges).forEach(eid => {
+      const edge = state.edges[eid];
+      if (edge.from === nodeId || edge.to === nodeId) delete state.edges[eid];
+    });
+  });
+  state.selectedNodeId = null;
+  state.selectedNodeIds = [];
+  closeNodeEditor();
+  saveState();
+  renderCanvas();
+  showToast(`✓ ${tr('delete')}: ${ids.length}`);
 }
 
 function edgeExists(fromId, toId) {
@@ -1537,14 +2061,25 @@ function edgeExists(fromId, toId) {
   );
 }
 
+function createEdgeDirect(fromId, toId, options = {}) {
+  if (!fromId || !toId || fromId === toId || edgeExists(fromId, toId)) return false;
+  if (!canUsePlanResource('links', getHubMetrics().totalEdges + 1)) {
+    if (!options.silentLimit) showPlanLimit('links');
+    return false;
+  }
+  const eid = 'e_' + (++state.edgeIdCounter);
+  state.edges[eid] = { id: eid, spaceId: state.currentSpaceId, from: fromId, to: toId };
+  return true;
+}
+
 function createConnection(fromId, toId) {
   if (!fromId || !toId || fromId === toId || edgeExists(fromId, toId)) return false;
   if (!canUsePlanResource('links', getHubMetrics().totalEdges + 1)) {
     showPlanLimit('links');
     return false;
   }
-  const eid = 'e_' + (++state.edgeIdCounter);
-  state.edges[eid] = { id: eid, spaceId: state.currentSpaceId, from: fromId, to: toId };
+  captureHistory(tr('connect'));
+  createEdgeDirect(fromId, toId);
   saveState();
   renderEdges();
   updateStats();
@@ -1553,12 +2088,27 @@ function createConnection(fromId, toId) {
 }
 
 // ===== SELECT =====
-function selectNode(id) {
-  state.selectedNodeId = id;
+function getSelectedNodeIds() {
+  return Array.isArray(state.selectedNodeIds) ? state.selectedNodeIds.filter(id => state.nodes[id]) : [];
+}
+
+function selectNode(id, additive = false) {
+  if (!id) {
+    state.selectedNodeId = null;
+    state.selectedNodeIds = [];
+  } else if (additive) {
+    const set = new Set(getSelectedNodeIds());
+    if (set.has(id)) set.delete(id);
+    else set.add(id);
+    state.selectedNodeIds = [...set];
+    state.selectedNodeId = state.selectedNodeIds[state.selectedNodeIds.length - 1] || null;
+  } else {
+    state.selectedNodeId = id;
+    state.selectedNodeIds = [id];
+  }
   document.querySelectorAll('.node').forEach(n => n.classList.remove('selected'));
-  if (id) {
-    const el = document.getElementById('node-' + id);
-    if (el) el.classList.add('selected');
+  getSelectedNodeIds().forEach(selectedId => document.getElementById('node-' + selectedId)?.classList.add('selected'));
+  if (state.selectedNodeId) {
     const deleteBtn = document.getElementById('delete-btn');
     if (deleteBtn) deleteBtn.style.display = '';
   } else {
@@ -1566,7 +2116,8 @@ function selectNode(id) {
     const deleteBtn = document.getElementById('delete-btn');
     if (deleteBtn) deleteBtn.style.display = 'none';
   }
-  renderConnectionSuggestions(id);
+  renderConnectionSuggestions(state.selectedNodeId);
+  if (state.viewMode === 'focus') renderCanvas();
 }
 
 // ===== CONNECT =====
@@ -1611,6 +2162,162 @@ function updateTempEdge(e) {
   if (path) {
     path.setAttribute('d', `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`);
     path.style.display = '';
+  }
+}
+
+function viewportPoint(e) {
+  const wrap = document.getElementById('canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top, rect };
+}
+
+function worldPointFromViewport(point) {
+  return {
+    x: (point.x - state.view.x) / state.view.scale,
+    y: (point.y - state.view.y) / state.view.scale
+  };
+}
+
+function startSelectionBox(e) {
+  const point = viewportPoint(e);
+  state.selecting = { start: point, current: point };
+  const box = document.getElementById('selection-box');
+  if (box) {
+    box.style.display = '';
+    box.style.left = point.x + 'px';
+    box.style.top = point.y + 'px';
+    box.style.width = '0px';
+    box.style.height = '0px';
+  }
+}
+
+function updateSelectionBox(e) {
+  if (!state.selecting) return;
+  const point = viewportPoint(e);
+  state.selecting.current = point;
+  const x = Math.min(state.selecting.start.x, point.x);
+  const y = Math.min(state.selecting.start.y, point.y);
+  const w = Math.abs(point.x - state.selecting.start.x);
+  const h = Math.abs(point.y - state.selecting.start.y);
+  const box = document.getElementById('selection-box');
+  if (box) {
+    box.style.left = x + 'px';
+    box.style.top = y + 'px';
+    box.style.width = w + 'px';
+    box.style.height = h + 'px';
+  }
+}
+
+function finishSelectionBox() {
+  if (!state.selecting) return;
+  const start = worldPointFromViewport(state.selecting.start);
+  const end = worldPointFromViewport(state.selecting.current);
+  const minX = Math.min(start.x, end.x);
+  const maxX = Math.max(start.x, end.x);
+  const minY = Math.min(start.y, end.y);
+  const maxY = Math.max(start.y, end.y);
+  const moved = Math.abs(state.selecting.start.x - state.selecting.current.x) + Math.abs(state.selecting.start.y - state.selecting.current.y);
+  const ids = moved < 8 ? [] : getSpaceNodes()
+    .filter(node => node.x + 160 >= minX && node.x <= maxX && node.y + 90 >= minY && node.y <= maxY)
+    .map(node => node.id);
+  state.selectedNodeIds = ids;
+  state.selectedNodeId = ids[ids.length - 1] || null;
+  state.selecting = null;
+  const box = document.getElementById('selection-box');
+  if (box) box.style.display = 'none';
+  document.querySelectorAll('.node').forEach(n => n.classList.remove('selected'));
+  ids.forEach(id => document.getElementById('node-' + id)?.classList.add('selected'));
+  if (state.selectedNodeId) {
+    const node = state.nodes[state.selectedNodeId];
+    openNodeEditor(node);
+    renderConnectionSuggestions(state.selectedNodeId);
+  } else {
+    closeNodeEditor();
+    renderConnectionSuggestions(null);
+  }
+  const deleteBtn = document.getElementById('delete-btn');
+  if (deleteBtn) deleteBtn.style.display = ids.length ? '' : 'none';
+  showToast(ids.length ? `${tr('select')}: ${ids.length}` : tr('select'));
+}
+
+function getEdgeSamplePoints(edge) {
+  const fromNode = state.nodes[edge.from];
+  const toNode = state.nodes[edge.to];
+  if (!fromNode || !toNode) return [];
+  const x1 = fromNode.x + 140;
+  const y1 = fromNode.y + 30;
+  const x2 = toNode.x;
+  const y2 = toNode.y + 30;
+  const cx = (x1 + x2) / 2;
+  const points = [];
+  for (let i = 0; i <= 18; i++) {
+    const t = i / 18;
+    const mt = 1 - t;
+    points.push({
+      x: mt * mt * mt * x1 + 3 * mt * mt * t * cx + 3 * mt * t * t * cx + t * t * t * x2,
+      y: mt * mt * mt * y1 + 3 * mt * mt * t * y1 + 3 * mt * t * t * y2 + t * t * t * y2
+    });
+  }
+  return points;
+}
+
+function segmentsIntersect(a, b, c, d) {
+  const cross = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  const ab1 = cross(a, b, c);
+  const ab2 = cross(a, b, d);
+  const cd1 = cross(c, d, a);
+  const cd2 = cross(c, d, b);
+  return (ab1 * ab2 <= 0) && (cd1 * cd2 <= 0);
+}
+
+function startCutting(e) {
+  const point = viewportPoint(e);
+  state.cutting = { last: worldPointFromViewport(point), cutIds: new Set(), trail: [point] };
+  const path = document.getElementById('cut-trail-path');
+  if (path) {
+    path.style.display = '';
+    path.setAttribute('d', `M ${point.x} ${point.y}`);
+  }
+  captureHistory(tr('cutLink'));
+}
+
+function updateCutting(e) {
+  if (!state.cutting) return;
+  const vp = viewportPoint(e);
+  const current = worldPointFromViewport(vp);
+  const last = state.cutting.last;
+  getSpaceEdges().forEach(edge => {
+    if (state.cutting.cutIds.has(edge.id)) return;
+    const pts = getEdgeSamplePoints(edge);
+    for (let i = 0; i < pts.length - 1; i++) {
+      if (segmentsIntersect(last, current, pts[i], pts[i + 1])) {
+        state.cutting.cutIds.add(edge.id);
+        delete state.edges[edge.id];
+        break;
+      }
+    }
+  });
+  state.cutting.last = current;
+  state.cutting.trail.push(vp);
+  const path = document.getElementById('cut-trail-path');
+  if (path) path.setAttribute('d', state.cutting.trail.map((p, i) => `${i ? 'L' : 'M'} ${p.x} ${p.y}`).join(' '));
+  renderCanvas();
+}
+
+function finishCutting() {
+  if (!state.cutting) return;
+  const count = state.cutting.cutIds.size;
+  state.cutting = null;
+  const path = document.getElementById('cut-trail-path');
+  if (path) {
+    path.style.display = 'none';
+    path.setAttribute('d', '');
+  }
+  if (count) {
+    saveState();
+    showToast(`${tr('cutLink')}: ${count}`);
+  } else {
+    state.history?.pop();
   }
 }
 
@@ -1735,6 +2442,7 @@ function saveNodeEdit() {
   if (!state.selectedNodeId) return;
   const node = state.nodes[state.selectedNodeId];
   if (!node) return;
+  captureHistory(tr('edit'));
   node.title = document.getElementById('editor-title')?.value || tr('title');
   node.desc = document.getElementById('editor-desc')?.value || '';
   node.tags = document.getElementById('editor-tags')?.value || '';
@@ -1787,6 +2495,7 @@ function closeNodeEditor() {
 function autoLayout() {
   const nodes = getSpaceNodes();
   if (!nodes.length) return;
+  captureHistory(tr('autoLayout'));
   const cols = Math.ceil(Math.sqrt(nodes.length));
   nodes.forEach((n, i) => {
     n.x = 60 + (i % cols) * 220;
@@ -1824,10 +2533,10 @@ function updateStats() {
 }
 
 // ===== SMART CONNECT =====
-function smartConnect() {
-  if (!requirePlan('plus', tr('smartLinks'))) return;
+async function smartConnect() {
   const nodes = getSpaceNodes();
   if (nodes.length < 2) { showToast(`⚠ ${tr('nodes')}: 2+`); return; }
+  captureHistory(tr('smartLinks'));
   const progressDiv = document.getElementById('smart-connect-progress');
   const progressFill = document.getElementById('progress-fill');
   const progressText = document.getElementById('progress-text');
@@ -1838,6 +2547,27 @@ function smartConnect() {
   }
   if (progressFill) progressFill.style.width = '0%';
   if (progressText) progressText.textContent = tr('analyzingNodes');
+  const aiLinks = await getAISemanticLinks(nodes);
+  if (aiLinks.length) {
+    let created = 0;
+    aiLinks.forEach(link => {
+      const from = nodes[link.from]?.id;
+      const to = nodes[link.to]?.id;
+      if (from && to && createEdgeDirect(from, to, { silentLimit: true })) created++;
+    });
+    if (progressFill) progressFill.style.width = '100%';
+    if (progressText) progressText.textContent = `✓ ${tr('linksCreated')}: ${created}`;
+    saveState();
+    renderCanvas();
+    showToast(`Puter AI: ${created} ${tr('links').toLowerCase()}`);
+    if (progressDiv) {
+      progressDiv._hideTimer = setTimeout(() => {
+        progressDiv.style.opacity = '0';
+        progressDiv._hideTimer = setTimeout(() => { progressDiv.style.display = 'none'; }, 220);
+      }, 450);
+    }
+    return;
+  }
   const existingEdges = new Set();
   getSpaceEdges().forEach(e => existingEdges.add(e.from + '|' + e.to));
   let totalPairs = nodes.length * (nodes.length - 1) / 2;
@@ -1886,8 +2616,8 @@ function smartConnect() {
       const common = tokensB.filter(t => tokensA.has(t)).length;
       const totalTokens = new Set([...tokensA, ...tokensB]).size;
       const similarity = totalTokens > 0 ? common / totalTokens : 0;
-      if (similarity >= 0.3) {
-        if (!canUsePlanResource('links', getHubMetrics().totalEdges + newEdges + 1)) {
+      if (common >= 1 && (similarity >= 0.12 || common >= 2)) {
+        if (!canUsePlanResource('links', getHubMetrics().totalEdges + 1)) {
           finishSmartConnect(tr('linkLimit'));
           showPlanLimit('links');
           return;
@@ -2053,13 +2783,20 @@ function renderSettings(tab) {
       </div>
     `;
   } else if (tab === 'data') {
+    const hasCurrentSpace = Boolean(state.currentSpaceId && state.spaces.some(s => s.id === state.currentSpaceId));
     el.innerHTML = `
       <div class="settings-section-title">${tr('dataTitle')}</div>
       <div class="settings-section-sub">// ${tr('dataSub')}</div>
       <div class="settings-group">
+        <div class="settings-group-title">${tr('advancedData')}</div>
         <button class="hub-download-btn" onclick="exportAllData()" style="margin-right:10px">${tr('exportBackup')}</button>
         <button class="hub-download-btn" onclick="importAllData()">${tr('importBackup')}</button>
         <div class="settings-note">${tr('storageNote')}</div>
+      </div>
+      <div class="settings-group">
+        <div class="settings-group-title">${tr('currentSpaceData')}</div>
+        <button class="hub-download-btn" onclick="exportSpaceJSON()" style="margin-right:10px" ${hasCurrentSpace ? '' : 'disabled'}>${tr('exportJson')}</button>
+        <button class="hub-download-btn" onclick="importSpaceJSON()">${tr('importJson')}</button>
       </div>
       <div class="settings-grid">
         <div class="settings-feature"><div class="settings-feature-kicker">${tr('backup')}</div><div class="settings-feature-title">${tr('backupTitle')}</div><div class="settings-feature-copy">${tr('backupCopy')}</div></div>
@@ -2083,10 +2820,11 @@ function renderSettings(tab) {
     `;
   } else if (tab === 'about') {
     el.innerHTML = `
-      <div class="settings-section-title">${tr('about')} <span>NeuroSpace</span></div>
+      <div class="settings-section-title">${tr('about')} <span>${BRAND_NAME}</span></div>
       <div class="settings-section-sub">// ${tr('aboutSub')}</div>
       <div class="settings-group">
         <p style="color:var(--text-dim);line-height:1.6">${tr('aboutCopy')}</p>
+        <button class="hub-nav-btn" onclick="checkForUpdates()">Перевірити оновлення</button>
       </div>
     `;
   }
@@ -2107,7 +2845,7 @@ function setLanguage(language) {
 
 function applyTheme(theme, silent = false) {
   state.theme = theme;
-  saveState();
+  saveState({ markUnsynced: !silent });
   const themes = {
     cyber: { bg: '#040810', bg2: '#080f1a', bg3: '#0d1829' },
     glass: { bg: '#0d0a20', bg2: '#120f2a', bg3: '#171330' },
@@ -2213,13 +2951,431 @@ function importAllData() {
   input.click();
 }
 
+function getAIPromptText() {
+  return (document.getElementById('ai-prompt-input')?.value || document.getElementById('quick-capture-input')?.value || '').trim();
+}
+
+function getAIModel() {
+  return 'gpt-4o-mini';
+}
+
+function isElectronRuntime() {
+  return Boolean(window.nodusBridge?.runtime?.isElectron);
+}
+
+function setAIMessage(message, kind = 'info') {
+  const responseEl = document.getElementById('ai-response-content');
+  if (!responseEl) return;
+  const color = kind === 'error' ? 'var(--accent2)' : (kind === 'warn' ? '#ffd166' : 'var(--text-dim)');
+  responseEl.innerHTML = `<p style="color:${color};font-size:12px;line-height:1.5;">${escHtml(message)}</p>`;
+}
+
+function loadExternalScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      existing.addEventListener('load', resolve, { once: true });
+      existing.addEventListener('error', reject, { once: true });
+      if (window.puter?.ai?.chat) resolve();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+async function ensurePuterAI() {
+  if (window.location.protocol === 'file:' || isElectronRuntime()) {
+    throw new Error('Real AI requires http://localhost or another web server, not file://');
+  }
+  if (!window.puter?.ai?.chat) {
+    await loadExternalScript('https://js.puter.com/v2/');
+  }
+  if (!window.puter?.ai?.chat) throw new Error('Puter AI is not available');
+}
+
+async function askRealAI(prompt, options = {}) {
+  if (isElectronRuntime() && window.nodusBridge?.askAI) {
+    const result = await window.nodusBridge.askAI(prompt, { model: options.model || getAIModel(), timeout: options.timeout || 14000 });
+    if (!result?.ok) throw new Error(result?.error || 'Secure AI backend is unavailable');
+    return String(result.text || '').trim();
+  }
+  await ensurePuterAI();
+  const request = window.puter.ai.chat(prompt, { model: options.model || getAIModel() });
+  const timeout = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('AI request timed out or is waiting for Puter sign-in')), options.timeout || 14000);
+  });
+  const response = await Promise.race([request, timeout]);
+  if (typeof response === 'string') return response;
+  return response?.message?.content || response?.text || response?.content || String(response || '');
+}
+
+function extractJSON(text) {
+  if (!text) return null;
+  const cleaned = String(text).replace(/```json|```/gi, '').trim();
+  try { return JSON.parse(cleaned); } catch (err) {}
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try { return JSON.parse(cleaned.slice(start, end + 1)); } catch (err) {}
+  }
+  return null;
+}
+
+function buildNodeGenerationPrompt(userPrompt) {
+  const lang = currentLang();
+  const typeList = Object.keys(NODE_TYPES).join(', ');
+  return `
+You are the AI brain inside ${BRAND_NAME}, a visual thinking app.
+User language: ${lang}. Reply only in that language.
+Create a practical knowledge graph for this user goal:
+"${userPrompt}"
+
+Return ONLY valid JSON, no markdown.
+Schema:
+{
+  "summary": "short useful summary",
+  "nodes": [
+    { "title": "short node title", "desc": "concrete action or reasoning", "type": "idea|task|question|resource|decision", "tags": "comma separated tags" }
+  ],
+  "links": [
+    { "from": 0, "to": 1, "reason": "why these nodes connect" }
+  ]
+}
+
+Rules:
+- Make 5 to 9 nodes.
+- Types must be one of: ${typeList}.
+- Make the graph actionable, not generic.
+- If user says they want to buy a car, include steps like budget, brand/model choice, market listings analysis, inspection, test drive, documents, negotiation, risks.
+- Links must connect nodes that overlap by meaning, cause, sequence, or shared decision context.
+`.trim();
+}
+
+function getCarBuyingBlueprint(prompt) {
+  if (currentLang() === 'ru') return [
+    { title: 'Бюджет', desc: 'Определить максимум: цена авто, налоги, страховка, регистрация, ремонт после покупки.', type: 'decision', tags: 'бюджет, деньги' },
+    { title: 'Марка и модель', desc: 'Выбрать 2-3 модели под задачи: город, семья, трасса, расход, надежность.', type: 'idea', tags: 'марка, модель' },
+    { title: 'Анализ объявлений', desc: 'Сравнить рынок: пробег, год, цена, комплектация, подозрительно дешевые варианты.', type: 'resource', tags: 'объявления, рынок' },
+    { title: 'История авто', desc: 'Проверить VIN, ДТП, владельцев, залоги, сервисную историю.', type: 'task', tags: 'vin, проверка' },
+    { title: 'Осмотр и диагностика', desc: 'Проверить кузов, двигатель, коробку, подвеску и компьютерную диагностику на СТО.', type: 'task', tags: 'осмотр, сто' },
+    { title: 'Тест-драйв', desc: 'Проверить тормоза, рулевое, шумы, переключения, поведение на скорости.', type: 'task', tags: 'тест-драйв' },
+    { title: 'Торг и документы', desc: 'Подготовить аргументы для торга и проверить договор, оплату, регистрацию.', type: 'decision', tags: 'торг, документы' },
+    { title: 'Риски', desc: 'Скрученный пробег, скрытые ДТП, кредит/залог, дорогой ремонт, мошенники.', type: 'question', tags: 'риски' }
+  ];
+  if (currentLang() === 'en') return [
+    { title: 'Budget', desc: 'Set the maximum: car price, taxes, insurance, registration and first repairs.', type: 'decision', tags: 'budget, money' },
+    { title: 'Brand and model', desc: 'Choose 2-3 models for your use case: city, family, highway, fuel use and reliability.', type: 'idea', tags: 'brand, model' },
+    { title: 'Listing analysis', desc: 'Compare mileage, year, price, trim and suspiciously cheap offers.', type: 'resource', tags: 'listings, market' },
+    { title: 'Vehicle history', desc: 'Check VIN, accidents, owners, liens and service history.', type: 'task', tags: 'vin, check' },
+    { title: 'Inspection', desc: 'Inspect body, engine, gearbox, suspension and diagnostics at a mechanic.', type: 'task', tags: 'inspection' },
+    { title: 'Test drive', desc: 'Check brakes, steering, noises, shifting and behavior at speed.', type: 'task', tags: 'test drive' },
+    { title: 'Negotiation and documents', desc: 'Prepare negotiation points and verify contract, payment and registration.', type: 'decision', tags: 'negotiation, documents' },
+    { title: 'Risks', desc: 'Rolled-back mileage, hidden crashes, lien, expensive repairs and scams.', type: 'question', tags: 'risks' }
+  ];
+  return [
+    { title: 'Бюджет', desc: 'Визначити максимум: ціна авто, податки, страхування, реєстрація, перший ремонт.', type: 'decision', tags: 'бюджет, гроші' },
+    { title: 'Марка і модель', desc: 'Обрати 2-3 моделі під задачі: місто, сім’я, траса, витрата пального, надійність.', type: 'idea', tags: 'марка, модель' },
+    { title: 'Аналіз оголошень', desc: 'Порівняти ринок: пробіг, рік, ціна, комплектація, підозріло дешеві варіанти.', type: 'resource', tags: 'оголошення, ринок' },
+    { title: 'Історія авто', desc: 'Перевірити VIN, ДТП, власників, застави, сервісну історію.', type: 'task', tags: 'vin, перевірка' },
+    { title: 'Огляд і діагностика', desc: 'Перевірити кузов, двигун, коробку, підвіску й комп’ютерну діагностику на СТО.', type: 'task', tags: 'огляд, сто' },
+    { title: 'Тест-драйв', desc: 'Перевірити гальма, кермо, шуми, перемикання, поведінку на швидкості.', type: 'task', tags: 'тест-драйв' },
+    { title: 'Торг і документи', desc: 'Підготувати аргументи для торгу й перевірити договір, оплату, реєстрацію.', type: 'decision', tags: 'торг, документи' },
+    { title: 'Ризики', desc: 'Скручений пробіг, приховані ДТП, кредит/застава, дорогий ремонт, шахраї.', type: 'question', tags: 'ризики' }
+  ];
+}
+
+function normalizeAINodes(data, fallbackPrompt) {
+  const rawNodes = Array.isArray(data?.nodes) ? data.nodes : [];
+  const nodes = rawNodes
+    .map((node, index) => ({
+      title: String(node.title || node.name || `${tr('typeIdea')} ${index + 1}`).slice(0, 80),
+      desc: String(node.desc || node.description || node.action || ''),
+      type: NODE_TYPES[node.type] ? node.type : (index % 4 === 1 ? 'question' : index % 4 === 2 ? 'task' : 'idea'),
+      tags: String(node.tags || '').slice(0, 120)
+    }))
+    .filter(node => node.title.trim());
+  const links = Array.isArray(data?.links) ? data.links : [];
+  return {
+    summary: String(data?.summary || fallbackPrompt || ''),
+    nodes,
+    links: links
+      .map(link => ({
+        from: Number(link.from),
+        to: Number(link.to),
+        reason: String(link.reason || '')
+      }))
+      .filter(link => Number.isInteger(link.from) && Number.isInteger(link.to))
+  };
+}
+
+function buildSemanticLinkPrompt(nodes) {
+  const lang = currentLang();
+  return `
+You are the semantic linker inside ${BRAND_NAME}.
+User language: ${lang}. Return ONLY valid JSON.
+Find meaningful links between nodes that overlap by idea, sequence, dependency, risk, decision, or shared context.
+
+Nodes:
+${nodes.map((node, index) => `${index}: ${node.title} | ${node.desc || ''} | tags: ${node.tags || ''}`).join('\n')}
+
+Return schema:
+{
+  "links": [
+    { "from": 0, "to": 1, "reason": "short reason" }
+  ]
+}
+
+Rules:
+- Suggest only strong semantic links.
+- Do not link everything to everything.
+- Prefer 3 to 12 links depending on graph size.
+`.trim();
+}
+
+async function getAISemanticLinks(nodes) {
+  try {
+    const raw = await askRealAI(buildSemanticLinkPrompt(nodes));
+    const parsed = extractJSON(raw);
+    return (Array.isArray(parsed?.links) ? parsed.links : [])
+      .map(link => ({
+        from: Number(link.from),
+        to: Number(link.to),
+        reason: String(link.reason || '')
+      }))
+      .filter(link => Number.isInteger(link.from) && Number.isInteger(link.to));
+  } catch (err) {
+    console.warn('Real AI linking failed, using local fallback:', err);
+    setAIMessage(`AI link analysis unavailable: ${err.message}. Using local linking fallback.`, 'warn');
+    return [];
+  }
+}
+
+async function generateGraphPlan(prompt) {
+  try {
+    const raw = await askRealAI(buildNodeGenerationPrompt(prompt));
+    const parsed = extractJSON(raw);
+    const normalized = normalizeAINodes(parsed, prompt);
+    if (normalized.nodes.length) return { ...normalized, source: 'ai' };
+  } catch (err) {
+    console.warn('Real AI generation failed, using local fallback:', err);
+    setAIMessage(`AI generation unavailable: ${err.message}. Using local generation fallback.`, 'warn');
+  }
+  return { summary: prompt, nodes: getPromptBlueprint(prompt), links: [], source: 'fallback' };
+}
+
+function getPromptBlueprint(prompt) {
+  const text = prompt.toLowerCase();
+  const isUkrainian = currentLang() === 'uk';
+  const isRussian = currentLang() === 'ru';
+  const carBuying = /(машин|авто|автомоб|car|vehicle|купити|купить|buy)/i.test(prompt) && /(купити|купить|buy|покуп)/i.test(prompt);
+  const clothing = /(одяг|одежд|clothing|fashion|бренд|brand|hoodie|футбол|streetwear)/i.test(prompt);
+  const startup = /(startup|стартап|бізнес|бизнес|product|продукт|запуст|launch|магазин)/i.test(prompt);
+  if (carBuying) return getCarBuyingBlueprint(prompt);
+  if (clothing) {
+    if (isUkrainian) return [
+      { title: 'ЦА', desc: 'Для кого бренд одягу: стиль, вік, бюджет, ситуації покупки.', type: 'idea', tags: 'аудиторія, бренд' },
+      { title: 'Продукт', desc: 'Перші речі в лінійці: базові моделі, матеріали, розміри, ціна.', type: 'decision', tags: 'одяг, продукт' },
+      { title: 'Позиціонування', desc: 'Чим бренд відрізняється: стиль, історія, цінність, візуальна мова.', type: 'idea', tags: 'бренд, позиціонування' },
+      { title: 'Канали продажу', desc: 'Instagram, TikTok, сайт, маркетплейси, попапи або локальні магазини.', type: 'resource', tags: 'продажі, канали' },
+      { title: 'Виробництво', desc: 'Постачальники, мінімальні партії, контроль якості, пакування.', type: 'task', tags: 'виробництво' },
+      { title: 'Ризики', desc: 'Перевиробництво, слабкий попит, касовий розрив, затримки постачання.', type: 'question', tags: 'ризики' }
+    ];
+    if (isRussian) return [
+      { title: 'ЦА', desc: 'Для кого бренд одежды: стиль, возраст, бюджет, ситуации покупки.', type: 'idea', tags: 'аудитория, бренд' },
+      { title: 'Продукт', desc: 'Первые вещи в линейке: базовые модели, материалы, размеры, цена.', type: 'decision', tags: 'одежда, продукт' },
+      { title: 'Позиционирование', desc: 'Чем бренд отличается: стиль, история, ценность, визуальный язык.', type: 'idea', tags: 'бренд, позиционирование' },
+      { title: 'Каналы продаж', desc: 'Instagram, TikTok, сайт, маркетплейсы, попапы или локальные магазины.', type: 'resource', tags: 'продажи, каналы' },
+      { title: 'Производство', desc: 'Поставщики, минимальные партии, контроль качества, упаковка.', type: 'task', tags: 'производство' },
+      { title: 'Риски', desc: 'Перепроизводство, слабый спрос, кассовый разрыв, задержки поставок.', type: 'question', tags: 'риски' }
+    ];
+    return [
+      { title: 'Target audience', desc: 'Who buys the clothing brand: style, budget, identity and purchase moments.', type: 'idea', tags: 'audience, brand' },
+      { title: 'Product line', desc: 'First pieces: core garments, materials, sizing and target price.', type: 'decision', tags: 'clothing, product' },
+      { title: 'Positioning', desc: 'What makes the brand distinct: style, story, value and visual language.', type: 'idea', tags: 'brand, positioning' },
+      { title: 'Sales channels', desc: 'Instagram, TikTok, website, marketplaces, popups or local stores.', type: 'resource', tags: 'sales, channels' },
+      { title: 'Production', desc: 'Suppliers, minimum orders, quality control and packaging.', type: 'task', tags: 'production' },
+      { title: 'Risks', desc: 'Overproduction, weak demand, cash gaps and supply delays.', type: 'question', tags: 'risks' }
+    ];
+  }
+  if (startup) {
+    return [
+      { title: isUkrainian ? 'Клієнт' : isRussian ? 'Клиент' : 'Customer', desc: prompt, type: 'idea', tags: isUkrainian ? 'клієнт, ідея' : isRussian ? 'клиент, идея' : 'customer, idea' },
+      { title: isUkrainian ? 'Проблема' : isRussian ? 'Проблема' : 'Problem', desc: isUkrainian ? 'Який біль або потребу треба вирішити?' : isRussian ? 'Какую боль или потребность нужно решить?' : 'What pain or need should be solved?', type: 'question', tags: isUkrainian ? 'проблема' : isRussian ? 'проблема' : 'problem' },
+      { title: isUkrainian ? 'Продукт' : isRussian ? 'Продукт' : 'Product', desc: isUkrainian ? 'Яке рішення можна зібрати першим?' : isRussian ? 'Какое решение можно собрать первым?' : 'What solution can be built first?', type: 'decision', tags: isUkrainian ? 'продукт' : isRussian ? 'продукт' : 'product' },
+      { title: isUkrainian ? 'Перевірка' : isRussian ? 'Проверка' : 'Validation', desc: isUkrainian ? 'Найменший тест попиту.' : isRussian ? 'Самый маленький тест спроса.' : 'The smallest demand test.', type: 'task', tags: 'mvp, test' },
+      { title: isUkrainian ? 'Канали' : isRussian ? 'Каналы' : 'Channels', desc: isUkrainian ? 'Де знайти перших користувачів або покупців?' : isRussian ? 'Где найти первых пользователей или покупателей?' : 'Where to find first users or buyers?', type: 'resource', tags: isUkrainian ? 'канали' : isRussian ? 'каналы' : 'channels' }
+    ];
+  }
+  const parts = prompt.split(/[.\n;]+/).map(p => p.trim()).filter(Boolean).slice(0, 7);
+  const base = parts.length > 1 ? parts : prompt.split(/,\s+|\s+і\s+|\s+и\s+|\s+and\s+/i).map(p => p.trim()).filter(p => p.length > 3).slice(0, 7);
+  const seed = base.length ? base : [prompt];
+  return seed.map((part, index) => ({
+    title: part.length > 46 ? part.slice(0, 43) + '...' : part,
+    desc: index === 0 ? prompt : part,
+    type: index % 4 === 1 ? 'question' : index % 4 === 2 ? 'task' : 'idea',
+    tags: isUkrainian ? 'думка' : isRussian ? 'мысль' : 'thought'
+  }));
+}
+
+function layoutGeneratedNodes(count) {
+  const center = getQuickCapturePosition(0, 1);
+  return Array.from({ length: count }, (_, index) => {
+    const angle = (Math.PI * 2 * index) / Math.max(1, count);
+    const radius = count > 3 ? 230 : 180;
+    return {
+      x: center.x + Math.cos(angle) * radius,
+      y: center.y + Math.sin(angle) * radius
+    };
+  });
+}
+
+async function generateNodesFromPrompt(prompt) {
+  if (!prompt.trim()) { showToast(tr('thinkEmpty')); return []; }
+  const responseEl = document.getElementById('ai-response-content');
+  if (responseEl) responseEl.innerHTML = `<div class="ai-loading">${tr('aiLoading')}</div>`;
+  let plan;
+  try {
+    plan = await generateGraphPlan(prompt);
+  } catch (err) {
+    setAIMessage(`AI failed: ${err.message}`, 'error');
+    showToast('AI failed');
+    return [];
+  }
+  if (!canUsePlanResource('nodes', getHubMetrics().totalNodes + plan.nodes.length)) {
+    showPlanLimit('nodes');
+    return [];
+  }
+  captureHistory(tr('think'));
+  const positions = layoutGeneratedNodes(plan.nodes.length);
+  const ids = plan.nodes.map((item, index) => {
+    const pos = positions[index];
+    const id = createNode(pos.x, pos.y, item.title, item.desc, index % NODE_COLORS.length, item.type || 'idea', {
+      skipHistory: true,
+      skipSave: true,
+      silent: true
+    });
+    if (id) state.nodes[id].tags = item.tags || '';
+    return id;
+  }).filter(Boolean);
+  const linked = new Set();
+  plan.links.forEach(link => {
+    const from = ids[link.from];
+    const to = ids[link.to];
+    if (from && to && createEdgeDirect(from, to, { silentLimit: true })) linked.add(`${from}|${to}`);
+  });
+  if (!linked.size && ids.length > 1) {
+    for (let i = 1; i < ids.length; i++) createEdgeDirect(ids[0], ids[i], { silentLimit: true });
+    for (let i = 1; i < ids.length - 1; i++) {
+      const a = state.nodes[ids[i]];
+      const b = state.nodes[ids[i + 1]];
+      const shared = tokenizeNode(a).some(token => tokenizeNode(b).includes(token));
+      if (shared || i % 2 === 1) createEdgeDirect(ids[i], ids[i + 1], { silentLimit: true });
+    }
+  }
+  saveState();
+  renderCanvas();
+  if (ids[0]) selectNode(ids[0]);
+  fitView();
+  if (responseEl) {
+    responseEl.innerHTML = `
+      <p><strong>${tr('aiSummary')}</strong></p>
+      <p>${escHtml(plan.summary || prompt)}</p>
+      <p>${plan.source === 'ai' ? 'Secure AI' : 'Local fallback'} · ${tr('generatedNodes')}: ${ids.length}</p>
+      ${plan.source === 'fallback' ? '<p style="color:var(--text-dim);font-size:12px;">External AI unavailable. Local assistant generated a practical graph.</p>' : ''}
+    `;
+  }
+  showToast(`✓ ${tr('generatedNodes')}: ${ids.length}`);
+  return ids;
+}
+
+function openThinkingMode() {
+  const panel = document.getElementById('ai-panel');
+  if (panel && !panel.classList.contains('open')) panel.classList.add('open');
+  const input = document.getElementById('ai-prompt-input');
+  const quick = document.getElementById('quick-capture-input');
+  if (input && quick?.value.trim() && !input.value.trim()) input.value = quick.value.trim();
+  input?.focus();
+  renderAISummary();
+}
+
+async function runThinkingModeFromAI() {
+  await generateNodesFromPrompt(getAIPromptText());
+  renderAISummary();
+}
+
+async function runThinkingModeFromQuick() {
+  const quick = document.getElementById('quick-capture-input');
+  const prompt = quick?.value.trim() || '';
+  if (!prompt) { showToast(tr('thinkEmpty')); quick?.focus(); return; }
+  const input = document.getElementById('ai-prompt-input');
+  if (input) input.value = prompt;
+  openThinkingMode();
+  await generateNodesFromPrompt(prompt);
+  if (quick) quick.value = '';
+}
+
+async function aiGenerateNodes() {
+  await generateNodesFromPrompt(getAIPromptText());
+}
+
+function getSpaceSummary() {
+  const nodes = getSpaceNodes();
+  const edges = getSpaceEdges();
+  const tokens = new Map();
+  nodes.forEach(node => tokenizeNode(node).forEach(token => {
+    if (token.length > 3) tokens.set(token, (tokens.get(token) || 0) + 1);
+  }));
+  const themes = [...tokens.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([token]) => token)
+    .join(', ') || tr('tagsNone');
+  const isolated = nodes.filter(node => !edges.some(edge => edge.from === node.id || edge.to === node.id)).length;
+  return {
+    nodes: nodes.length,
+    links: edges.length,
+    themes,
+    isolated,
+    density: nodes.length > 1 ? Math.round((edges.length / (nodes.length * (nodes.length - 1) / 2)) * 100) : 0
+  };
+}
+
+function renderAISummary() {
+  const responseEl = document.getElementById('ai-response-content');
+  if (!responseEl) return;
+  const summary = getSpaceSummary();
+  responseEl.innerHTML = `
+    <p><strong>${tr('aiSummary')}</strong></p>
+    <p>${tr('spaceSummaryIntro', { nodes: summary.nodes, links: summary.links, themes: summary.themes })}</p>
+    <p>${tr('density')}: ${summary.density}% · ${tr('isolated')}: ${summary.isolated}</p>
+    <div class="snapshot-list">
+      <strong>${tr('versionHistory')}</strong>
+      ${(state.snapshots || []).slice(0, 5).map(item => `
+        <button class="snapshot-item" onclick="restoreVersionSnapshot('${item.id}')">
+          <span>${escHtml(item.label)}</span>
+          <small>${new Date(item.at).toLocaleString()}</small>
+        </button>
+      `).join('') || `<small>${tr('noSuggestions')}</small>`}
+    </div>
+  `;
+}
+
 // ===== AI PANEL =====
 function toggleAIPanel() {
-  if (!requirePlan('pro', tr('aiAssistant'))) return;
   const panel = document.getElementById('ai-panel');
   if (!panel) return;
   panel.classList.toggle('open');
-  if (panel.classList.contains('open')) generateAIResponse();
+  if (panel.classList.contains('open')) {
+    generateAIResponse();
+    if (isElectronRuntime()) {
+      setAIMessage('Secure AI mode: renderer has no API keys. Configure AI_BACKEND_ENDPOINT for real AI, local assistant fallback remains available.', 'info');
+    }
+  }
 }
 
 function closeAIPanel() {
@@ -2266,14 +3422,23 @@ function getCommandItems() {
     { name: tr('plans'), hint: tr('managePlan'), action: openSubscriptionModal },
     { name: tr('settings'), hint: tr('interfaceControl'), action: () => showPage('settings') },
     { name: tr('friendsTitle'), hint: tr('friendsSub'), action: openFriendsLocked },
-    { name: `${tr('export')} HTML`, hint: tr('downloaded'), action: () => downloadSite({ preventDefault: () => {} }) },
     { name: tr('backHub'), hint: tr('mySpaces'), action: () => showPage('hub'), enabled: inEngine },
     { name: tr('quickCapture'), hint: tr('quickPlaceholder'), action: () => document.getElementById('quick-capture-input')?.focus(), enabled: inEngine },
-    { name: tr('addNode'), hint: tr('tools'), action: () => setTool('node'), enabled: inEngine },
-    { name: tr('connect'), hint: tr('connectionMode'), action: () => setTool('connect'), enabled: inEngine },
+    { name: tr('think'), hint: tr('thinkingPlaceholder'), action: openThinkingMode, enabled: inEngine },
+    { name: tr('createNodeCommand'), hint: tr('tools'), action: () => setTool('node'), enabled: inEngine },
+    { name: tr('connectNodesCommand'), hint: tr('connectionMode'), action: () => setTool('connect'), enabled: inEngine },
     { name: tr('autoLayout'), hint: tr('actions'), action: autoLayout, enabled: inEngine },
     { name: tr('isolated'), hint: tr('suggestedLinks'), action: highlightIsolatedNodes, enabled: inEngine },
     { name: tr('smartLinks'), hint: tr('suggestedLinks'), action: smartConnect, enabled: inEngine },
+    { name: tr('summary'), hint: tr('aiSummary'), action: () => { openThinkingMode(); renderAISummary(); }, enabled: inEngine },
+    { name: tr('undo'), hint: tr('versionHistory'), action: undoLastChange, enabled: inEngine },
+    { name: tr('snapshot'), hint: tr('versionHistory'), action: () => createVersionSnapshot(), enabled: inEngine },
+    { name: tr('listView'), hint: tr('viewChanged'), action: () => setViewMode('list'), enabled: inEngine },
+    { name: tr('timelineView'), hint: tr('viewChanged'), action: () => setViewMode('timeline'), enabled: inEngine },
+    { name: tr('focusView'), hint: tr('viewChanged'), action: () => setViewMode('focus'), enabled: inEngine },
+    { name: tr('graphView'), hint: tr('viewChanged'), action: () => setViewMode('graph'), enabled: inEngine },
+    { name: tr('zoomIn'), hint: tr('fitView'), action: () => zoom(1.2), enabled: inEngine },
+    { name: tr('zoomOut'), hint: tr('fitView'), action: () => zoom(0.8), enabled: inEngine },
     { name: tr('fitView'), hint: tr('actions'), action: fitView, enabled: inEngine },
     { name: tr('exportJson'), hint: tr('export'), action: exportSpaceJSON, enabled: inEngine }
   ].filter(item => item.enabled !== false);
@@ -2347,19 +3512,6 @@ function showToast(msg) {
   t._timer = setTimeout(() => t.classList.remove('show'), 2200);
 }
 
-function downloadSite(e) {
-  e.preventDefault();
-  const html = document.documentElement.outerHTML;
-  const blob = new Blob([html], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'neurospace.html';
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast(`⬇ ${tr('downloaded')}`);
-}
-
 // ===== EVENT LISTENERS =====
 document.addEventListener('DOMContentLoaded', () => {
   loadState();
@@ -2367,6 +3519,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (state.theme) applyTheme(state.theme, true);
   if (state.currentUser) showPage('hub');
   else showPage('gate');
+  setSyncStatus(state.hasUnsyncedChanges ? 'unsynced' : 'local');
+  startAutoSyncTimer();
 
   // Кнопка Enter на странице входа
   const loginPass = document.getElementById('login-pass');
@@ -2415,7 +3569,9 @@ document.addEventListener('DOMContentLoaded', () => {
     wrap.addEventListener('mousedown', (e) => {
       if (e.target === wrap || e.target.id === 'canvas-world' || e.target.closest('#grid-svg') || e.target.closest('#main-edges-svg')) {
         if (state.tool === 'node') { addNodeAt(e); return; }
+        if (state.tool === 'cut') { startCutting(e); return; }
         if (state.tool === 'connect') { cancelConnect(); return; }
+        if (state.tool === 'select' && !e.altKey && e.button === 0) { startSelectionBox(e); return; }
         state.panning = true;
         state.panStart = { x: e.clientX - state.view.x, y: e.clientY - state.view.y };
         selectNode(null);
@@ -2427,11 +3583,36 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     wrap.addEventListener('wheel', (e) => {
       e.preventDefault();
-      zoom(e.deltaY > 0 ? 0.9 : 1.1, e.clientX, e.clientY);
+      const step = e.deltaY > 0 ? -0.08 : 0.08;
+      state.zoomMomentum = Math.max(-0.35, Math.min(0.35, (state.zoomMomentum || 0) + step));
+      state.zoomAnchor = { x: e.clientX, y: e.clientY };
+      if (!state._zoomRAF) {
+        const tick = () => {
+          if (Math.abs(state.zoomMomentum || 0) < 0.002) {
+            state.zoomMomentum = 0;
+            state._zoomRAF = null;
+            return;
+          }
+          const factor = 1 + state.zoomMomentum;
+          zoom(factor, state.zoomAnchor?.x, state.zoomAnchor?.y);
+          state.zoomMomentum *= 0.86;
+          state._zoomRAF = requestAnimationFrame(tick);
+        };
+        state._zoomRAF = requestAnimationFrame(tick);
+      }
     }, { passive: false });
   }
 
+  document.querySelectorAll('.engine-group .tool-btn, .engine-group .view-mode-btn, .quick-capture-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const group = btn.closest('.engine-group')?.dataset.group;
+      if (group) setActiveSidebarGroup(group);
+    });
+  });
+
   document.addEventListener('mousemove', (e) => {
+    if (state.selecting) updateSelectionBox(e);
+    if (state.cutting) updateCutting(e);
     if (state.panning) {
       state.view.x = e.clientX - state.panStart.x;
       state.view.y = e.clientY - state.panStart.y;
@@ -2439,7 +3620,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (state.connectSource) updateTempEdge(e);
   });
-  document.addEventListener('mouseup', () => { state.panning = false; });
+  document.addEventListener('mouseup', () => {
+    if (state.selecting) finishSelectionBox();
+    if (state.cutting) finishCutting();
+    state.panning = false;
+  });
 
   document.addEventListener('click', (e) => {
     if (!state.connectSource) return;
@@ -2467,3 +3652,222 @@ document.addEventListener('keydown', (e) => {
   if (!typing && e.key === 'n' && !e.ctrlKey && !e.metaKey && document.getElementById('engine')?.classList.contains('active')) setTool('node');
   if (!typing && e.ctrlKey && e.key === 's') { e.preventDefault(); saveNodeEdit(); }
 });
+
+function setSyncStatus(status = 'local', message = '') {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+
+  const labels = {
+    local: 'Local only',
+    unsynced: 'Unsynced',
+    syncing: 'Syncing...',
+    synced: 'Synced',
+    failed: 'Sync failed'
+  };
+
+  el.className = `sync-status ${status}`;
+  el.textContent = labels[status] || labels.local;
+  const proHint = state.subscriptionPlan === 'pro' ? 'Auto sync: Pro enabled' : 'Auto sync доступний у Pro';
+  el.title = message ? `${message} · ${proHint}` : proHint;
+}
+
+async function syncCurrentUserToSupabase() {
+  try {
+    if (!state.currentUser) {
+      setSyncStatus('local', 'No active user');
+      showToast('Немає активного користувача');
+      return false;
+    }
+
+    persistCurrentUserData();
+    setSyncStatus('syncing', 'Manual sync started');
+    showToast('Синхронізація...');
+
+    const result = await window.nodusBridge.cloudPush({
+      spaces: state.spaces,
+      nodes: state.nodes,
+      edges: state.edges
+    });
+
+    if (!result.ok) {
+      setSyncStatus('failed', result.error || 'Cloud sync failed');
+      showToast(`Sync failed: ${result.error}`);
+      return false;
+    }
+
+    state.hasUnsyncedChanges = false;
+    saveState({ markUnsynced: false });
+    setSyncStatus('synced', `Синхронізовано: ${result.counts.spaces} spaces · ${result.counts.nodes} nodes · ${result.counts.edges} edges`);
+    showToast(`Синхронізовано: ${result.counts.spaces} spaces · ${result.counts.nodes} nodes · ${result.counts.edges} edges`);
+    return true;
+  } catch (e) {
+    setSyncStatus('failed', e.message);
+    showToast(`Sync failed: ${e.message}`);
+    return false;
+  }
+}
+
+async function loadCurrentUserFromSupabase() {
+  try {
+    if (!state.currentUser) {
+      setSyncStatus('local', 'No active user');
+      return false;
+    }
+
+    if (!window.nodusBridge?.cloudPull) {
+      setSyncStatus('failed', 'Cloud load is unavailable');
+      showToast('⚠ Cloud load недоступний');
+      return false;
+    }
+
+    state.isCloudLoading = true;
+    state.snapshots = state.snapshots || [];
+    state.snapshots.unshift({
+      id: 'cloud_load_backup_' + Date.now(),
+      label: 'Before Cloud Load',
+      at: Date.now(),
+      data: cloneGraphState()
+    });
+    state.snapshots = state.snapshots.slice(0, 12);
+    saveState({ markUnsynced: false });
+
+    setSyncStatus('syncing', 'Loading data from cloud');
+    const result = await window.nodusBridge.cloudPull();
+
+    if (!result.ok) {
+      setSyncStatus('failed', result.error || 'Cloud load failed');
+      showToast(`⚠ Load failed: ${result.error}`);
+      return false;
+    }
+
+    const cloud = result.data || {};
+    const cloudSpaces = cloud.spaces || [];
+
+    if (!cloudSpaces.length && state.spaces.length) {
+      setSyncStatus('failed', 'Cloud is empty; local data kept');
+      showToast('⚠ Cloud is empty. Local data kept.');
+      return false;
+    }
+
+    state.spaces = cloudSpaces;
+    state.nodes = cloud.nodes || {};
+    state.edges = cloud.edges || {};
+
+    state.nodeIdCounter = getMaxCounterFromObject(state.nodes);
+    state.edgeIdCounter = getMaxCounterFromObject(state.edges);
+    state.spaceIdCounter = getMaxCounterFromArray(state.spaces);
+
+    persistCurrentUserData();
+    state.hasUnsyncedChanges = false;
+    saveState({ markUnsynced: false });
+
+    if (typeof renderHub === 'function') renderHub();
+    if (typeof renderEngine === 'function') renderEngine();
+    if (typeof updateStats === 'function') updateStats();
+
+    showToast(`✓ Loaded: ${result.counts.spaces} spaces, ${result.counts.nodes} nodes, ${result.counts.edges} edges`);
+    setSyncStatus('synced', 'Loaded from cloud');
+    return true;
+  } catch (error) {
+    setSyncStatus('failed', error.message);
+    showToast(`⚠ Load crash: ${error.message}`);
+    return false;
+  } finally {
+    state.isCloudLoading = false;
+  }
+}
+
+function getMaxCounterFromObject(obj) {
+  const ids = Object.keys(obj || {})
+    .map(id => {
+      const match = String(id).match(/\d+/);
+      return match ? parseInt(match[0], 10) : NaN;
+    })
+    .filter(Number.isFinite);
+
+  return ids.length ? Math.max(...ids) : 0;
+}
+
+function getMaxCounterFromArray(arr) {
+  const ids = (arr || [])
+    .map(item => {
+      const match = String(item.id).match(/\d+/);
+      return match ? parseInt(match[0], 10) : NaN;
+    })
+    .filter(Number.isFinite);
+
+  return ids.length ? Math.max(...ids) : 0;
+}
+let cloudSyncTimer = null;
+let isCloudSyncing = false;
+
+function startAutoSyncTimer() {
+  if (cloudSyncTimer) return;
+  cloudSyncTimer = setInterval(runAutoSyncIfNeeded, 60000);
+}
+
+function scheduleCloudSync() {
+  startAutoSyncTimer();
+}
+
+async function runAutoSyncIfNeeded() {
+  try {
+    if (!state.currentUser) return;
+    if (!window.nodusBridge?.cloudPush) return;
+    if (state.subscriptionPlan !== 'pro') return;
+    if (!state.hasUnsyncedChanges) return;
+    if (state.isCloudLoading || isCloudSyncing) return;
+
+    isCloudSyncing = true;
+    persistCurrentUserData();
+    setSyncStatus('syncing', 'Auto sync started');
+
+    const result = await window.nodusBridge.cloudPush({
+      spaces: state.spaces,
+      nodes: state.nodes,
+      edges: state.edges
+    });
+
+    if (!result.ok) {
+      console.warn('Auto sync failed:', result.error);
+      setSyncStatus('failed', result.error || 'Auto sync failed');
+      showToast(`Sync failed: ${result.error}`);
+      return;
+    }
+
+    state.hasUnsyncedChanges = false;
+    saveState({ markUnsynced: false });
+    setSyncStatus('synced', `Auto synced: ${result.counts.spaces} spaces · ${result.counts.nodes} nodes · ${result.counts.edges} edges`);
+    showToast(`Автосинхронізовано: ${result.counts.spaces} spaces · ${result.counts.nodes} nodes · ${result.counts.edges} edges`);
+  } catch (e) {
+    console.warn('Auto sync crash:', e.message);
+    setSyncStatus('failed', e.message);
+  } finally {
+    isCloudSyncing = false;
+  }
+}
+
+async function syncCurrentUserToSupabaseSilent() {
+  return runAutoSyncIfNeeded();
+}
+
+async function quitAppSafely() {
+  try {
+    persistCurrentUserData();
+    saveState();
+
+    if (
+      state.subscriptionPlan === 'pro' &&
+      state.hasUnsyncedChanges &&
+      typeof syncCurrentUserToSupabaseSilent === 'function'
+    ) {
+      await syncCurrentUserToSupabaseSilent();
+    }
+
+    if (window.nodusBridge?.appQuit) {
+      await window.nodusBridge.appQuit();
+    }
+  } catch (error) {
+    console.warn('Quit failed:', error);
+  }
+}
