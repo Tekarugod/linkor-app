@@ -823,14 +823,18 @@ async function loadAppVersion() {
 
 function renderUpdateInstallButton() {
   const button = document.getElementById('install-update-btn');
-  if (button) button.style.display = updateReadyToInstall ? 'inline-flex' : 'none';
+  if (!button) return;
+  button.style.display = updateReadyToInstall ? 'inline-flex' : 'none';
+  button.disabled = !updateReadyToInstall;
 }
 
 async function checkForUpdates() {
   try {
+    updateReadyToInstall = false;
+    renderUpdateInstallButton();
     showToast('Перевіряю оновлення...');
     const result = await window.nodusBridge?.checkForUpdates?.();
-    if (result?.message) showToast(result.message);
+    if (result?.message && result.ok === false) showToast(result.message);
   } catch (error) {
     console.warn('Update check failed:', error);
     showToast(`Не вдалося перевірити оновлення: ${error.message}`);
@@ -848,6 +852,12 @@ async function downloadUpdate() {
 }
 
 async function installUpdate() {
+  if (!updateReadyToInstall) {
+    showToast('Оновлення ще не завантажено.');
+    renderUpdateInstallButton();
+    return;
+  }
+
   try {
     await window.nodusBridge?.installUpdate?.();
   } catch (error) {
@@ -857,12 +867,18 @@ async function installUpdate() {
 }
 
 window.nodusBridge?.onUpdateAvailable?.((info) => {
-  showToast(`Доступна нова версія: v${info.version}. Починаю скачування...`);
+  updateReadyToInstall = false;
+  renderUpdateInstallButton();
+  showToast(`Знайдено нову версію Linkor: v${info.version}. Завантажую...`);
   downloadUpdate();
 });
 
-window.nodusBridge?.onUpdateNotAvailable?.(() => {
-  showToast('У вас остання версія Linkor.');
+window.nodusBridge?.onUpdateNotAvailable?.(async () => {
+  updateReadyToInstall = false;
+  renderUpdateInstallButton();
+  if (!latestAppVersion) await loadAppVersion();
+  const version = latestAppVersion ? `: v${latestAppVersion}` : '';
+  showToast(`У вас встановлена остання версія Linkor${version}`);
 });
 
 window.nodusBridge?.onUpdateProgress?.((progress) => {
@@ -877,7 +893,15 @@ window.nodusBridge?.onUpdateDownloaded?.(() => {
 });
 
 window.nodusBridge?.onUpdateError?.((error) => {
-  showToast(`Помилка оновлення: ${error.message}`);
+  updateReadyToInstall = false;
+  renderUpdateInstallButton();
+  showToast(`Помилка оновлення: ${error?.message || 'невідома помилка'}`);
+});
+
+window.nodusBridge?.onUpdateChecking?.(() => {
+  updateReadyToInstall = false;
+  renderUpdateInstallButton();
+  showToast('Перевіряю оновлення...');
 });
 
 function setText(selector, value) {
