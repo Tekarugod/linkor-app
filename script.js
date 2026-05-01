@@ -1796,13 +1796,61 @@ function anchorDirection(anchor) {
   }[anchor] || { x: 1, y: 0 };
 }
 
-function createEdgePathData(start, end, sourceAnchor = DEFAULT_EDGE_SOURCE_ANCHOR, targetAnchor = DEFAULT_EDGE_TARGET_ANCHOR) {
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function isHorizontalAnchor(anchor) {
+  return anchor === 'left' || anchor === 'right';
+}
+
+function isVerticalAnchor(anchor) {
+  return anchor === 'top' || anchor === 'bottom';
+}
+
+function getEdgeControlPoints(start, end, sourceAnchor = DEFAULT_EDGE_SOURCE_ANCHOR, targetAnchor = DEFAULT_EDGE_TARGET_ANCHOR) {
   const sd = anchorDirection(sourceAnchor);
   const td = anchorDirection(targetAnchor);
-  const distance = Math.hypot(end.x - start.x, end.y - start.y);
-  const handle = Math.max(48, Math.min(180, distance * 0.42));
-  const c1 = { x: start.x + sd.x * handle, y: start.y + sd.y * handle };
-  const c2 = { x: end.x + td.x * handle, y: end.y + td.y * handle };
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const distance = Math.hypot(dx, dy);
+  const offset = clamp(distance * 0.38, distance < 90 ? 18 : 38, 180);
+
+  if (distance < 28) {
+    const tiny = Math.max(8, distance * 0.35);
+    return {
+      c1: { x: start.x + sd.x * tiny, y: start.y + sd.y * tiny },
+      c2: { x: end.x + td.x * tiny, y: end.y + td.y * tiny }
+    };
+  }
+
+  if (isHorizontalAnchor(sourceAnchor) && isHorizontalAnchor(targetAnchor)) {
+    const primary = clamp(Math.abs(dx) * 0.5, 28, 170);
+    const handle = Math.min(offset, primary);
+    return {
+      c1: { x: start.x + sd.x * handle, y: start.y },
+      c2: { x: end.x + td.x * handle, y: end.y }
+    };
+  }
+
+  if (isVerticalAnchor(sourceAnchor) && isVerticalAnchor(targetAnchor)) {
+    const primary = clamp(Math.abs(dy) * 0.5, 28, 170);
+    const handle = Math.min(offset, primary);
+    return {
+      c1: { x: start.x, y: start.y + sd.y * handle },
+      c2: { x: end.x, y: end.y + td.y * handle }
+    };
+  }
+
+  const mixedHandle = clamp(distance * 0.32, 28, 145);
+  return {
+    c1: { x: start.x + sd.x * mixedHandle, y: start.y + sd.y * mixedHandle },
+    c2: { x: end.x + td.x * mixedHandle, y: end.y + td.y * mixedHandle }
+  };
+}
+
+function createEdgePathData(start, end, sourceAnchor = DEFAULT_EDGE_SOURCE_ANCHOR, targetAnchor = DEFAULT_EDGE_TARGET_ANCHOR) {
+  const { c1, c2 } = getEdgeControlPoints(start, end, sourceAnchor, targetAnchor);
   return `M ${start.x} ${start.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${end.x} ${end.y}`;
 }
 
@@ -2293,8 +2341,20 @@ function edgeExists(fromId, toId) {
   );
 }
 
+function edgeExistsExact(fromId, toId, sourceAnchor = DEFAULT_EDGE_SOURCE_ANCHOR, targetAnchor = DEFAULT_EDGE_TARGET_ANCHOR) {
+  return Object.values(state.edges).some(e => {
+    normalizeEdge(e);
+    return getEdgeSourceId(e) === fromId &&
+      getEdgeTargetId(e) === toId &&
+      e.sourceAnchor === sourceAnchor &&
+      e.targetAnchor === targetAnchor;
+  });
+}
+
 function createEdgeDirect(fromId, toId, options = {}) {
-  if (!fromId || !toId || fromId === toId || edgeExists(fromId, toId)) return false;
+  const sourceAnchor = options.sourceAnchor || DEFAULT_EDGE_SOURCE_ANCHOR;
+  const targetAnchor = options.targetAnchor || DEFAULT_EDGE_TARGET_ANCHOR;
+  if (!fromId || !toId || fromId === toId || edgeExistsExact(fromId, toId, sourceAnchor, targetAnchor)) return false;
   if (!canUsePlanResource('links', getHubMetrics().totalEdges + 1)) {
     if (!options.silentLimit) showPlanLimit('links');
     return false;
@@ -2305,14 +2365,14 @@ function createEdgeDirect(fromId, toId, options = {}) {
     state.currentSpaceId,
     fromId,
     toId,
-    options.sourceAnchor || DEFAULT_EDGE_SOURCE_ANCHOR,
-    options.targetAnchor || DEFAULT_EDGE_TARGET_ANCHOR
+    sourceAnchor,
+    targetAnchor
   );
   return true;
 }
 
 function createConnection(fromId, toId, sourceAnchor = DEFAULT_EDGE_SOURCE_ANCHOR, targetAnchor = DEFAULT_EDGE_TARGET_ANCHOR) {
-  if (!fromId || !toId || fromId === toId || edgeExists(fromId, toId)) return false;
+  if (!fromId || !toId || fromId === toId || edgeExistsExact(fromId, toId, sourceAnchor, targetAnchor)) return false;
   if (!canUsePlanResource('links', getHubMetrics().totalEdges + 1)) {
     showPlanLimit('links');
     return false;
@@ -2371,19 +2431,89 @@ function startConnect(nodeId, anchor = DEFAULT_EDGE_SOURCE_ANCHOR, e) {
   showToast(tr('connectionMode'));
 }
 
+function getNearestAnchorForNode(nodeId, viewportPointValue) {
+  const node = state.nodes[nodeId];
+  if (!node) return null;
+  const world = worldPointFromViewport(viewportPointValue);
+  return getNodeAnchors(node)
+    .map(anchor => ({ anchor, point: getAnchorPoint(nodeId, anchor) }))
+    .filter(item => item.point)
+    .map(item => ({
+      anchor: item.anchor,
+      distance: Math.hypot(item.point.x - world.x, item.point.y - world.y)
+    }))
+    .sort((a, b) => a.distance - b.distance)[0]?.anchor || null;
+}
+
+function getNearbyAnchorFromEvent(e, maxDistance = 28) {
+  const matches = [...document.querySelectorAll('.node-anchor')]
+    .map(anchorEl => {
+      const rect = anchorEl.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      return {
+        anchorEl,
+        nodeId: anchorEl.dataset.nodeId,
+        anchor: anchorEl.dataset.anchor,
+        distance: Math.hypot(cx - e.clientX, cy - e.clientY)
+      };
+    })
+    .filter(item => item.nodeId && item.anchor && item.distance <= maxDistance)
+    .sort((a, b) => a.distance - b.distance);
+  return matches[0] || null;
+}
+
+function getConnectionTargetFromEvent(e) {
+  const anchorEl = e.target.closest?.('.node-anchor');
+  if (anchorEl) {
+    return { nodeId: anchorEl.dataset.nodeId, anchor: anchorEl.dataset.anchor, anchorEl };
+  }
+  const nearby = getNearbyAnchorFromEvent(e);
+  if (nearby) return nearby;
+  const nodeEl = e.target.closest?.('.node');
+  if (!nodeEl) return null;
+  const nodeId = nodeEl.id.replace('node-', '');
+  const vp = viewportPoint(e);
+  const anchor = getNearestAnchorForNode(nodeId, vp);
+  return anchor ? { nodeId, anchor, nodeEl } : null;
+}
+
+function clearConnectionHighlights() {
+  document.querySelectorAll('.node.connection-target').forEach(el => el.classList.remove('connection-target'));
+  document.querySelectorAll('.node-anchor.connection-target-anchor').forEach(el => el.classList.remove('connection-target-anchor'));
+}
+
+function updateConnectionTargetHighlight(e) {
+  clearConnectionHighlights();
+  if (!state.connectSource) return;
+  const target = getConnectionTargetFromEvent(e);
+  if (!target || target.nodeId === state.connectSource.nodeId) return;
+  const nodeEl = document.getElementById('node-' + target.nodeId);
+  const anchorEl = nodeEl?.querySelector(`.node-anchor[data-anchor="${target.anchor}"]`);
+  nodeEl?.classList.add('connection-target');
+  anchorEl?.classList.add('connection-target-anchor');
+}
+
 function finishConnect(toId, targetAnchor = DEFAULT_EDGE_TARGET_ANCHOR) {
   const source = state.connectSource;
   if (!source || !source.nodeId || source.nodeId === toId) { cancelConnect(); return; }
   const targetNode = state.nodes[toId];
   if (!targetNode || !getNodeAnchors(targetNode).includes(targetAnchor)) { cancelConnect(); return; }
-  if (edgeExists(source.nodeId, toId)) { showToast(`⚠ ${tr('linkButton')} exists`); cancelConnect(); return; }
+  if (edgeExistsExact(source.nodeId, toId, source.anchor, targetAnchor)) { showToast(`⚠ ${tr('linkButton')} exists`); cancelConnect(); return; }
   createConnection(source.nodeId, toId, source.anchor, targetAnchor);
   cancelConnect();
   showToast(`✓ ${tr('links')}`);
 }
 
+function finishConnectFromEvent(e) {
+  const target = getConnectionTargetFromEvent(e);
+  if (!target) { cancelConnect(); return; }
+  finishConnect(target.nodeId, target.anchor);
+}
+
 function cancelConnect() {
   state.connectSource = null;
+  clearConnectionHighlights();
   const indicator = document.getElementById('connect-indicator');
   if (indicator) indicator.classList.remove('active');
   const tp = document.getElementById('temp-edge-path');
@@ -2401,12 +2531,16 @@ function updateTempEdge(e) {
   const startWorld = getAnchorPoint(source.nodeId, source.anchor);
   if (!startWorld) return;
   const start = viewportPointFromWorld(startWorld);
-  const end = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  const target = getConnectionTargetFromEvent(e);
+  const targetWorld = target && target.nodeId !== source.nodeId ? getAnchorPoint(target.nodeId, target.anchor) : null;
+  const end = targetWorld ? viewportPointFromWorld(targetWorld) : { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  const targetAnchor = targetWorld ? target.anchor : DEFAULT_EDGE_TARGET_ANCHOR;
   const path = document.getElementById('temp-edge-path');
   if (path) {
-    path.setAttribute('d', createEdgePathData(start, end, source.anchor, DEFAULT_EDGE_TARGET_ANCHOR));
+    path.setAttribute('d', createEdgePathData(start, end, source.anchor, targetAnchor));
     path.style.display = '';
   }
+  updateConnectionTargetHighlight(e);
 }
 
 function viewportPoint(e) {
@@ -2494,12 +2628,12 @@ function getEdgeSamplePoints(edge) {
   const start = getAnchorPoint(sourceId, edge.sourceAnchor || DEFAULT_EDGE_SOURCE_ANCHOR);
   const end = getAnchorPoint(targetId, edge.targetAnchor || DEFAULT_EDGE_TARGET_ANCHOR);
   if (!start || !end) return [];
-  const sd = anchorDirection(edge.sourceAnchor || DEFAULT_EDGE_SOURCE_ANCHOR);
-  const td = anchorDirection(edge.targetAnchor || DEFAULT_EDGE_TARGET_ANCHOR);
-  const distance = Math.hypot(end.x - start.x, end.y - start.y);
-  const handle = Math.max(48, Math.min(180, distance * 0.42));
-  const c1 = { x: start.x + sd.x * handle, y: start.y + sd.y * handle };
-  const c2 = { x: end.x + td.x * handle, y: end.y + td.y * handle };
+  const { c1, c2 } = getEdgeControlPoints(
+    start,
+    end,
+    edge.sourceAnchor || DEFAULT_EDGE_SOURCE_ANCHOR,
+    edge.targetAnchor || DEFAULT_EDGE_TARGET_ANCHOR
+  );
   const points = [];
   for (let i = 0; i <= 18; i++) {
     const t = i / 18;
@@ -2523,13 +2657,42 @@ function segmentsIntersect(a, b, c, d) {
 
 function startCutting(e) {
   const point = viewportPoint(e);
-  state.cutting = { last: worldPointFromViewport(point), cutIds: new Set(), trail: [point] };
+  state.cutting = { last: worldPointFromViewport(point), cutIds: new Set(), trail: [{ ...point, t: performance.now() }] };
   const path = document.getElementById('cut-trail-path');
   if (path) {
     path.style.display = '';
+    path.style.opacity = '0.9';
     path.setAttribute('d', `M ${point.x} ${point.y}`);
   }
+  scheduleCutTrailFade();
   captureHistory(tr('cutLink'));
+}
+
+function renderCutTrail() {
+  if (!state.cutting) return;
+  const now = performance.now();
+  state.cutting.trail = state.cutting.trail.filter(point => now - point.t < 520);
+  const path = document.getElementById('cut-trail-path');
+  if (!path) return;
+  if (!state.cutting.trail.length) {
+    path.setAttribute('d', '');
+    return;
+  }
+  path.setAttribute('d', state.cutting.trail.map((p, i) => `${i ? 'L' : 'M'} ${p.x} ${p.y}`).join(' '));
+  path.style.opacity = String(clamp(1 - ((now - state.cutting.trail[0].t) / 700), 0.25, 0.95));
+}
+
+function scheduleCutTrailFade() {
+  if (!state.cutting || state.cutting.raf) return;
+  const tick = () => {
+    if (!state.cutting) return;
+    renderCutTrail();
+    state.cutting.raf = null;
+    if (state.cutting.trail.length) {
+      state.cutting.raf = requestAnimationFrame(tick);
+    }
+  };
+  state.cutting.raf = requestAnimationFrame(tick);
 }
 
 function updateCutting(e) {
@@ -2549,21 +2712,29 @@ function updateCutting(e) {
     }
   });
   state.cutting.last = current;
-  state.cutting.trail.push(vp);
-  const path = document.getElementById('cut-trail-path');
-  if (path) path.setAttribute('d', state.cutting.trail.map((p, i) => `${i ? 'L' : 'M'} ${p.x} ${p.y}`).join(' '));
+  state.cutting.trail.push({ ...vp, t: performance.now() });
+  renderCutTrail();
+  scheduleCutTrailFade();
   renderCanvas();
+}
+
+function clearCutTrail() {
+  const path = document.getElementById('cut-trail-path');
+  if (!path) return;
+  path.style.opacity = '0';
+  setTimeout(() => {
+    path.style.display = 'none';
+    path.style.opacity = '';
+    path.setAttribute('d', '');
+  }, 220);
 }
 
 function finishCutting() {
   if (!state.cutting) return;
   const count = state.cutting.cutIds.size;
+  if (state.cutting.raf) cancelAnimationFrame(state.cutting.raf);
   state.cutting = null;
-  const path = document.getElementById('cut-trail-path');
-  if (path) {
-    path.style.display = 'none';
-    path.setAttribute('d', '');
-  }
+  clearCutTrail();
   if (count) {
     saveState();
     showToast(`${tr('cutLink')}: ${count}`);
@@ -3897,13 +4068,13 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('mouseup', (e) => {
     if (state.selecting) finishSelectionBox();
     if (state.cutting) finishCutting();
-    if (state.connectSource && !e.target.closest('.node-anchor')) cancelConnect();
+    if (state.connectSource) finishConnectFromEvent(e);
     state.panning = false;
   });
 
   document.addEventListener('click', (e) => {
     if (!state.connectSource) return;
-    if (!e.target.closest('.node-anchor')) cancelConnect();
+    if (!e.target.closest('.node') && !e.target.closest('.node-anchor')) cancelConnect();
   });
 });
 
