@@ -35,7 +35,7 @@ body::before {
   inset: 0;
   background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.12) 2px, rgba(0,0,0,0.12) 4px);
   pointer-events: none;
-  z-index: 9999;
+  z-index: 8990;
   animation: scanMove 8s linear infinite;
 }
 @keyframes scanMove { from{background-position:0 0} to{background-position:0 40px} }
@@ -1694,7 +1694,7 @@ body::before {
 .onboarding-overlay {
   position: fixed;
   inset: 0;
-  z-index: 5000;
+  z-index: 9000;
   display: none;
   pointer-events: none;
   background: transparent;
@@ -1709,6 +1709,7 @@ body::before {
 }
 .onboarding-spotlight {
   position: fixed;
+  z-index: 9010;
   border: 1px solid rgba(113, 239, 255, 0.78);
   border-radius: 10px;
   pointer-events: none;
@@ -1718,8 +1719,14 @@ body::before {
     inset 0 0 18px rgba(0,245,255,0.08);
   transition: all 0.2s ease;
 }
+.onboarding-active-target {
+  position: relative !important;
+  z-index: 9015 !important;
+  box-shadow: 0 0 0 1px rgba(113,239,255,0.72), 0 0 24px rgba(0,245,255,0.3) !important;
+}
 .onboarding-welcome {
   position: fixed;
+  z-index: 9030;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
@@ -1766,6 +1773,7 @@ body::before {
 }
 .onboarding-card {
   position: fixed;
+  z-index: 9020;
   width: min(340px, calc(100vw - 36px));
   border: 1px solid rgba(0,245,255,0.42);
   border-radius: 8px;
@@ -2177,7 +2185,7 @@ body::before {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.7);
-  z-index: 10000;
+  z-index: 5000;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -805,6 +805,7 @@ function showPage(id) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   const target = document.getElementById(id);
   if (target) target.classList.add('active');
+  document.querySelectorAll('.onboarding-active-target').forEach(el => el.classList.remove('onboarding-active-target'));
   applyStaticTranslations();
   if (id === 'hub') {
     renderHub();
@@ -1493,7 +1494,7 @@ function openSpace(id) {
   state.selectedNodeId = null;
   state.connectSource = null;
   showPage('engine');
-  emitLinkorEvent('space-opened', { id });
+  emitLinkorEvent('space-opened', { id, spaceId: id });
 }
 
 // ===== PROFILE MODAL =====
@@ -1504,7 +1505,9 @@ function openProfileModal() {
   const totalNodes = Object.values(state.nodes).filter(n => state.spaces.some(s => s.id === n.spaceId)).length;
   const totalEdges = Object.values(state.edges).filter(e => state.spaces.some(s => s.id === e.spaceId)).length;
   const modal = document.getElementById('modal');
-  modal.querySelector('.modal-box')?.classList.remove('modal-box-wide');
+  const modalBox = modal.querySelector('.modal-box');
+  modalBox?.classList.remove('modal-box-wide');
+  modalBox?.setAttribute('data-tour', 'space-create-modal');
   document.getElementById('modal-title').textContent = `// ${tr('profileModalTitle')}`;
   document.getElementById('modal-body').innerHTML = `
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
@@ -1666,6 +1669,13 @@ function openNewSpaceModal() {
   `;
   modal.style.display = 'flex';
   emitLinkorEvent('space-modal-opened');
+  emitLinkorEvent('space-create-modal-opened');
+  requestAnimationFrame(() => {
+    if (isOnboardingActive()) renderOnboardingStep();
+  });
+  setTimeout(() => {
+    if (isOnboardingActive()) renderOnboardingStep();
+  }, 50);
   setTimeout(() => {
     const input = document.getElementById('new-space-name');
     if (input) {
@@ -1718,7 +1728,7 @@ function createSpace() {
   closeModal();
   showToast(`✓ ${tr('spaceCreated')}: ${name}`);
   renderHub();
-  emitLinkorEvent('space-created', { id: space.id, name: space.name });
+  emitLinkorEvent('space-created', { id: space.id, spaceId: space.id, name: space.name });
 }
 
 function createTemplateContent(spaceId, templateId) {
@@ -1755,6 +1765,7 @@ function handleModalClick(e) {
 }
 function closeModal() {
   document.querySelector('.modal-box')?.classList.remove('modal-box-wide');
+  document.querySelector('.modal-box')?.removeAttribute('data-tour');
   document.getElementById('modal').style.display = 'none';
 }
 
@@ -2248,7 +2259,7 @@ function createNode(x, y, title, desc, colorIdx, type = 'idea', options = {}) {
   if (world) world.appendChild(createNodeEl(state.nodes[id]));
   updateStats();
   selectNode(id);
-  emitLinkorEvent('node-created', { id, node: state.nodes[id], count: getSpaceNodes().length });
+  emitLinkorEvent('node-created', { id, nodeId: id, node: state.nodes[id], count: getSpaceNodes().length });
   if (!options.silent) showToast(`✓ ${tr('addNode')}`);
   return id;
 }
@@ -2330,7 +2341,7 @@ function addSubnode(e, parentId) {
   if (!id) return;
   const eid = 'e_' + (++state.edgeIdCounter);
   state.edges[eid] = createEdgeRecord(eid, state.currentSpaceId, parentId, id, 'bottom', 'top');
-  emitLinkorEvent('edge-created', { id: eid, edge: state.edges[eid] });
+  emitLinkorEvent('edge-created', { id: eid, edgeId: eid, edge: state.edges[eid] });
   emitLinkorEvent('subtopic-created', { id, parentId, edgeId: eid });
   saveState();
   renderCanvas();
@@ -2448,7 +2459,7 @@ function createEdgeDirect(fromId, toId, options = {}) {
     sourceAnchor,
     targetAnchor
   );
-  emitLinkorEvent('edge-created', { id: eid, edge: state.edges[eid] });
+  emitLinkorEvent('edge-created', { id: eid, edgeId: eid, edge: state.edges[eid] });
   return true;
 }
 
@@ -4054,18 +4065,16 @@ let onboarding = {
 };
 
 const ONBOARDING_STEPS = [
-  { target: '[data-tour="create-space"]', title: 'Створи простір', text: 'Натисни тут, щоб створити нове поле для ідей, планів або проєктів.', waitFor: 'space-modal-opened' },
-  { target: '[data-tour="space-title"]', title: 'Назва простору', text: 'Введи назву, щоб легко знаходити цей простір пізніше.' },
-  { target: '[data-tour="templates"]', title: 'Шаблони', text: 'Тут можна обрати готовий шаблон для швидкого старту.' },
-  { target: '[data-tour="space-color"]', title: 'Візуальний тон', text: 'Колір допомагає відрізняти різні простори.' },
-  { target: '[data-tour="create-space-submit"]', title: 'Створення', text: 'Натисни, щоб створити простір і перейти до карти.', waitFor: 'space-created' },
-  { target: '[data-tour="tools-panel"]', title: 'Панель інструментів', text: 'Тут знаходяться основні інструменти для роботи з картою.' },
+  { target: '[data-tour="create-space"]', title: 'Створи простір', text: 'Натисни тут, щоб створити нове поле для ідей або проєкту.', waitFor: 'space-create-modal-opened' },
+  { target: '[data-tour="space-title"]', title: 'Назва простору', text: 'Введи назву простору. Наприклад: Мій перший проєкт.' },
+  { target: '[data-tour="templates"]', title: 'Шаблони', text: 'Обери шаблон для швидкого старту або залиш порожній простір.' },
+  { target: '[data-tour="space-color"]', title: 'Колір', text: 'Обери візуальний тон простору.' },
+  { target: '[data-tour="create-space-submit"]', title: 'Створити', text: 'Натисни, щоб створити простір і перейти до карти.', waitFor: 'space-created' },
+  { target: '[data-tour="tools-panel"]', title: 'Інструменти', text: 'Тут знаходяться інструменти для створення і редагування карти.' },
   { target: '[data-tour="add-node"]', title: 'Перший блок', text: 'Натисни Add node, щоб створити перший блок.', waitFor: 'node-created' },
-  { target: () => onboarding.lastNodeId ? `#node-${onboarding.lastNodeId}` : '.node', title: 'Блок', text: 'Блок зберігає думку, задачу або ідею. Його можна рухати та з’єднувати.' },
-  { target: '[data-tour="add-node"]', title: 'Другий блок', text: 'Створи ще один блок, щоб побудувати зв’язок.', waitFor: 'second-node-created' },
-  { target: '[data-tour="connect-tool"]', title: 'Зв’язок', text: 'Обери Connect, потім потягни лінію від одного блоку до іншого.', waitFor: 'edge-created' },
-  { target: '[data-tour="graph-canvas"]', title: 'Готово', text: 'Тепер ти бачиш, як ідеї пов’язані між собою.' },
-  { target: '[data-tour="subtopic-button"]', title: 'Підтеми', text: 'Підтеми створюють дочірні блоки й автоматично під’єднують їх до основної ідеї.', optional: true },
+  { target: () => onboarding.lastNodeId ? `#node-${onboarding.lastNodeId}` : '.node', title: 'Блок', text: 'Це блок для думки, задачі або ідеї. Його можна рухати та з’єднувати.' },
+  { target: '[data-tour="add-node"]', title: 'Другий блок', text: 'Створи ще один блок, щоб пов’язати ідеї.', waitFor: 'second-node-created' },
+  { target: '[data-tour="connect-tool"]', title: 'Зв’язок', text: 'Обери Connect і протягни лінію від одного блоку до іншого.', waitFor: 'edge-created' },
   { target: null, title: 'Екскурсію завершено', text: 'Тепер можеш створювати власні карти в Linkor.', final: true }
 ];
 
@@ -4111,10 +4120,34 @@ function getOnboardingTarget(step) {
   return selector ? document.querySelector(selector) : null;
 }
 
+function getOnboardingSelector(step) {
+  return typeof step?.target === 'function' ? step.target() : step?.target;
+}
+
+function waitForTarget(selector, timeoutMs = 5000) {
+  const started = Date.now();
+  return new Promise(resolve => {
+    const tick = () => {
+      const target = selector ? document.querySelector(selector) : null;
+      if (target || Date.now() - started >= timeoutMs) {
+        resolve(target);
+        return;
+      }
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+}
+
+function clearOnboardingTarget() {
+  document.querySelectorAll('.onboarding-active-target').forEach(el => el.classList.remove('onboarding-active-target'));
+}
+
 function positionOnboardingCard(target) {
   const card = document.getElementById('onboarding-card');
   const spotlight = document.getElementById('onboarding-spotlight');
   if (!card || !spotlight) return;
+  clearOnboardingTarget();
   if (!target) {
     spotlight.style.display = 'none';
     card.style.left = '50%';
@@ -4124,22 +4157,29 @@ function positionOnboardingCard(target) {
   }
   const rect = target.getBoundingClientRect();
   const pad = 10;
+  target.classList.add('onboarding-active-target');
   spotlight.style.display = '';
   spotlight.style.left = `${rect.left - pad}px`;
   spotlight.style.top = `${rect.top - pad}px`;
   spotlight.style.width = `${rect.width + pad * 2}px`;
   spotlight.style.height = `${rect.height + pad * 2}px`;
-  target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   const cardWidth = 340;
   const cardHeight = 210;
-  const preferRight = rect.right + cardWidth + 24 < window.innerWidth;
-  const preferLeft = rect.left - cardWidth - 24 > 0;
-  const left = preferRight
-    ? rect.right + 18
-    : preferLeft
-      ? rect.left - cardWidth - 18
-      : Math.max(18, Math.min(window.innerWidth - cardWidth - 18, rect.left));
-  const top = Math.max(18, Math.min(window.innerHeight - cardHeight - 18, rect.top + rect.height / 2 - cardHeight / 2));
+  const gap = 18;
+  const candidates = [
+    { left: rect.right + gap, top: rect.top + rect.height / 2 - cardHeight / 2 },
+    { left: rect.left - cardWidth - gap, top: rect.top + rect.height / 2 - cardHeight / 2 },
+    { left: rect.left + rect.width / 2 - cardWidth / 2, top: rect.bottom + gap },
+    { left: rect.left + rect.width / 2 - cardWidth / 2, top: rect.top - cardHeight - gap }
+  ];
+  const fits = candidate =>
+    candidate.left >= 18 &&
+    candidate.top >= 18 &&
+    candidate.left + cardWidth <= window.innerWidth - 18 &&
+    candidate.top + cardHeight <= window.innerHeight - 18;
+  const chosen = candidates.find(fits) || candidates[2];
+  const left = Math.max(18, Math.min(window.innerWidth - cardWidth - 18, chosen.left));
+  const top = Math.max(18, Math.min(window.innerHeight - cardHeight - 18, chosen.top));
   card.style.left = `${left}px`;
   card.style.top = `${top}px`;
   card.style.transform = 'none';
@@ -4197,6 +4237,8 @@ function renderOnboardingStep() {
   wait.textContent = step.waitFor ? 'Натисни підсвічений елемент і виконай дію, щоб продовжити.' : '';
   onboarding.waitingFor = step.waitFor || null;
   positionOnboardingCard(target);
+  requestAnimationFrame(() => positionOnboardingCard(getOnboardingTarget(step)));
+  setTimeout(() => positionOnboardingCard(getOnboardingTarget(step)), 50);
   localStorage.setItem(ONBOARDING_STEP_KEY, String(onboarding.stepIndex));
   renderOutdatedBanner();
 }
@@ -4204,14 +4246,18 @@ function renderOnboardingStep() {
 function waitForOnboardingTarget(step) {
   clearTimeout(onboarding.targetTimer);
   document.getElementById('onboarding-overlay')?.classList.remove('active');
-  const now = Date.now();
-  if (!onboarding.targetStartedAt) onboarding.targetStartedAt = now;
-  if (now - onboarding.targetStartedAt > 5000 || step.optional) {
-    onboarding.targetStartedAt = 0;
-    nextOnboardingStep();
-    return;
-  }
-  onboarding.targetTimer = setTimeout(renderOnboardingStep, 250);
+  const selector = getOnboardingSelector(step);
+  if (!selector || onboarding.targetTimer) return;
+  waitForTarget(selector, 5000).then(target => {
+    onboarding.targetTimer = null;
+    if (!onboarding.active) return;
+    if (target) {
+      renderOnboardingStep();
+      return;
+    }
+    advanceOnboardingStep();
+  });
+  onboarding.targetTimer = setTimeout(() => {}, 5000);
 }
 
 function renderOnboardingFinal(step) {
@@ -4262,6 +4308,7 @@ function completeOnboardingTour() {
   onboarding.active = false;
   onboarding.waitingFor = null;
   clearTimeout(onboarding.targetTimer);
+  clearOnboardingTarget();
   localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
   localStorage.removeItem(ONBOARDING_STEP_KEY);
   document.getElementById('onboarding-overlay')?.classList.remove('active');
@@ -4316,13 +4363,23 @@ function handleOnboardingEvent(eventName) {
   }
 }
 
-['space-modal-opened', 'space-created', 'space-opened', 'node-created', 'edge-created', 'subtopic-created'].forEach(name => {
+['space-create-modal-opened', 'space-modal-opened', 'space-created', 'space-opened', 'node-created', 'edge-created', 'subtopic-created'].forEach(name => {
   window.addEventListener(`linkor:${name}`, () => handleOnboardingEvent(name));
 });
 
 window.addEventListener('resize', () => {
   if (onboarding.active) renderOnboardingStep();
 });
+
+window.addEventListener('scroll', () => {
+  if (onboarding.active) renderOnboardingStep();
+}, true);
+
+window.resetLinkorOnboarding = function() {
+  localStorage.removeItem(ONBOARDING_COMPLETED_KEY);
+  localStorage.removeItem(ONBOARDING_STEP_KEY);
+  location.reload();
+};
 
 // ===== EVENT LISTENERS =====
 document.addEventListener('DOMContentLoaded', () => {
