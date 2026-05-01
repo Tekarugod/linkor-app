@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('nodusBridge', {
   appQuit: () => ipcRenderer.invoke('app:quit'),
   getAppVersion: () => ipcRenderer.invoke('app:version'),
   checkForUpdates: () => ipcRenderer.invoke('app:check-updates'),
+  checkForUpdatesSilent: () => ipcRenderer.invoke('app:check-updates-silent'),
   downloadUpdate: () => ipcRenderer.invoke('app:download-update'),
   installUpdate: () => ipcRenderer.invoke('app:install-update'),
   onUpdateChecking: (callback) => ipcRenderer.on('update:checking', callback),

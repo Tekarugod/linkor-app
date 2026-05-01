@@ -64,7 +64,7 @@
         <button class="hub-nav-btn" onclick="loadCurrentUserFromSupabase()">Load Cloud</button>
         <div class="sync-status local" id="sync-status" title="Cloud sync status">Local only</div>
         <button class="hub-nav-btn locked" onclick="openFriendsLocked()">Friends</button>
-        <button class="hub-nav-btn" onclick="showPage('settings')">Settings</button>
+        <button class="hub-nav-btn" onclick="showPage('settings')" data-tour="about-system">Settings</button>
         <div class="hub-user">
             <div class="hub-avatar" id="hub-avatar">NS</div>
             <span class="hub-username" id="hub-username">NeuroPilot</span>
@@ -78,8 +78,9 @@
                 <div class="hub-kicker">Command Center</div>
                 <div class="hub-title">Мои <span>Пространства</span></div>
             </div>
-            <button class="hub-new-btn" onclick="openNewSpaceModal()"><span>New Space</span></button>
+            <button class="hub-new-btn" onclick="openNewSpaceModal()" data-tour="create-space"><span>New Space</span></button>
         </div>
+        <div id="outdated-version-banner" class="outdated-version-banner" style="display:none"></div>
         <div class="hub-overview" id="hub-overview"></div>
         <div class="hub-tools">
             <input class="hub-search" type="text" id="hub-search" placeholder="Search spaces..." oninput="renderHub()">
@@ -107,7 +108,7 @@
                     <span class="engine-group-arrow">▼</span><span class="engine-group-icon">🧠</span><span class="engine-group-label">THINKING</span>
                 </button>
                 <div class="engine-group-body" id="group-thinking">
-                    <div class="quick-capture">
+                    <div class="quick-capture" data-tour="quick-capture">
                         <div class="engine-sidebar-title">// Quick Capture</div>
                         <textarea id="quick-capture-input" class="quick-capture-input" placeholder="One thought per line..."></textarea>
                         <div class="think-row">
@@ -122,7 +123,7 @@
                 </div>
             </div>
 
-            <div class="engine-group" data-group="editing">
+            <div class="engine-group" data-group="editing" data-tour="tools-panel">
                 <button class="engine-group-head" onclick="toggleSidebarSection('editing')">
                     <span class="engine-group-arrow">▼</span><span class="engine-group-icon">✎</span><span class="engine-group-label">EDITING</span>
                 </button>
@@ -131,10 +132,10 @@
                         <button class="tool-btn active" id="tool-select" onclick="setTool('select')">
                             <span class="tool-btn-icon">↖</span> Выбор
                         </button>
-                        <button class="tool-btn" id="tool-node" onclick="setTool('node')">
+                        <button class="tool-btn" id="tool-node" onclick="setTool('node')" data-tour="add-node">
                             <span class="tool-btn-icon">☐</span> Добавить узел
                         </button>
-                        <button class="tool-btn" id="tool-connect" onclick="setTool('connect')">
+                        <button class="tool-btn" id="tool-connect" onclick="setTool('connect')" data-tour="connect-tool">
                             <span class="tool-btn-icon">⤢</span> Связь
                         </button>
                         <button class="tool-btn" id="tool-cut" onclick="setTool('cut')">
@@ -345,7 +346,7 @@
         <div class="settings-nav-item" onclick="setSettingsTab('friends')">
             <span>FR</span> Friends
         </div>
-        <div class="settings-nav-item" onclick="setSettingsTab('about')">
+        <div class="settings-nav-item" onclick="setSettingsTab('about')" data-tour="about-system">
             <span>AB</span> О системе
         </div>
         <button class="settings-back-btn" onclick="showPage('hub')">← НАЗАД В ХАБ</button>

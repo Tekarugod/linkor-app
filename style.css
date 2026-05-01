@@ -1650,6 +1650,113 @@ body::before {
   background: rgba(255,255,255,0.06);
   pointer-events: none;
 }
+
+.outdated-version-banner {
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(0,245,255,0.28);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(0,245,255,0.08), rgba(123,47,255,0.08)), rgba(4,8,16,0.9);
+  box-shadow: 0 14px 34px rgba(0,0,0,0.28), 0 0 24px rgba(0,245,255,0.08);
+}
+.outdated-version-banner div {
+  display: grid;
+  gap: 3px;
+}
+.outdated-version-banner strong {
+  color: #e7f8ff;
+  font-family: 'Orbitron', monospace;
+  font-size: 12px;
+}
+.outdated-version-banner span {
+  color: #8fb0c4;
+  font-size: 13px;
+}
+.outdated-version-banner button {
+  border: 1px solid rgba(0,245,255,0.32);
+  background: rgba(0,245,255,0.08);
+  color: var(--accent);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: 'Share Tech Mono', monospace;
+  cursor: pointer;
+}
+.outdated-version-banner .outdated-banner-close {
+  width: 30px;
+  padding: 7px 0;
+  color: var(--text-dim);
+  background: transparent;
+}
+
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: none;
+  pointer-events: none;
+  background: rgba(1, 5, 12, 0.58);
+  backdrop-filter: blur(2px);
+}
+.onboarding-overlay.active {
+  display: block;
+}
+.onboarding-spotlight {
+  position: fixed;
+  border: 1px solid rgba(113, 239, 255, 0.78);
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 9999px rgba(1, 5, 12, 0.5),
+    0 0 28px rgba(0,245,255,0.34),
+    inset 0 0 18px rgba(0,245,255,0.08);
+  transition: all 0.2s ease;
+}
+.onboarding-card {
+  position: fixed;
+  width: min(360px, calc(100vw - 36px));
+  border: 1px solid rgba(0,245,255,0.42);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(9,20,38,0.98), rgba(4,9,20,0.98));
+  box-shadow: 0 24px 70px rgba(0,0,0,0.58), 0 0 30px rgba(0,245,255,0.16);
+  padding: 16px;
+  pointer-events: auto;
+}
+.onboarding-progress {
+  color: var(--accent);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+.onboarding-text {
+  color: #d7edf8;
+  font-size: 15px;
+  line-height: 1.45;
+}
+.onboarding-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.onboarding-actions button {
+  border: 1px solid rgba(0,245,255,0.32);
+  background: rgba(0,245,255,0.1);
+  color: var(--accent);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: 'Share Tech Mono', monospace;
+  cursor: pointer;
+}
+.onboarding-actions button.ghost {
+  color: var(--text-dim);
+  background: transparent;
+}
+.onboarding-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 .structured-view {
   position: absolute;
   inset: 62px 18px 18px;

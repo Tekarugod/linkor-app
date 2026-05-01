@@ -3,6 +3,8 @@ const BRAND_NAME = 'Linkor';
 const BRAND_TAGLINE = 'thinking graph engine';
 let latestAppVersion = '';
 let updateReadyToInstall = false;
+let updateCheckMode = 'manual';
+let availableUpdateInfo = null;
 
 let state = {
   users: {},
@@ -794,6 +796,10 @@ function persistCurrentUserData() {
   };
 }
 
+function emitLinkorEvent(name, detail = {}) {
+  window.dispatchEvent(new CustomEvent(`linkor:${name}`, { detail }));
+}
+
 // ===== NAVIGATION =====
 function showPage(id) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -803,6 +809,7 @@ function showPage(id) {
   if (id === 'hub') {
     renderHub();
     loadAppVersion();
+    checkForUpdatesSilent();
   }
   if (id === 'engine') renderEngine();
   if (id === 'settings') {
@@ -836,6 +843,7 @@ function renderUpdateInstallButton() {
 
 async function checkForUpdates() {
   try {
+    updateCheckMode = 'manual';
     updateReadyToInstall = false;
     renderUpdateInstallButton();
     showToast('Перевіряю оновлення...');
@@ -845,6 +853,49 @@ async function checkForUpdates() {
     console.warn('Update check failed:', error);
     showToast(`Не вдалося перевірити оновлення: ${error.message}`);
   }
+}
+
+async function checkForUpdatesSilent() {
+  if (checkForUpdatesSilent._running || availableUpdateInfo || isOnboardingActive()) return;
+  checkForUpdatesSilent._running = true;
+  updateCheckMode = 'silent';
+  try {
+    await window.nodusBridge?.checkForUpdatesSilent?.();
+  } catch (error) {
+    console.warn('Silent update check failed:', error);
+  } finally {
+    checkForUpdatesSilent._running = false;
+  }
+}
+
+function renderOutdatedBanner() {
+  const banner = document.getElementById('outdated-version-banner');
+  if (!banner) return;
+  if (!availableUpdateInfo || isOnboardingActive()) {
+    banner.style.display = 'none';
+    return;
+  }
+  const version = String(availableUpdateInfo.version || 'new');
+  if (localStorage.getItem('linkorOutdatedBannerDismissedVersion') === version) {
+    banner.style.display = 'none';
+    return;
+  }
+  banner.innerHTML = `
+    <div><strong>Доступна нова версія Linkor.</strong><span>Оновіть її в Налаштування → Про систему → Перевірити оновлення.</span></div>
+    <button onclick="openAboutSettingsFromBanner()">Перейти до Про систему</button>
+    <button class="outdated-banner-close" onclick="dismissOutdatedBanner('${escAttr(version)}')">×</button>
+  `;
+  banner.style.display = 'flex';
+}
+
+function dismissOutdatedBanner(version) {
+  localStorage.setItem('linkorOutdatedBannerDismissedVersion', version || '');
+  renderOutdatedBanner();
+}
+
+function openAboutSettingsFromBanner() {
+  showPage('settings');
+  setSettingsTab('about');
 }
 
 async function downloadUpdate() {
@@ -873,13 +924,23 @@ async function installUpdate() {
 }
 
 window.nodusBridge?.onUpdateAvailable?.((info) => {
+  availableUpdateInfo = info || {};
   updateReadyToInstall = false;
   renderUpdateInstallButton();
+  if (updateCheckMode === 'silent') {
+    updateCheckMode = 'manual';
+    renderOutdatedBanner();
+    return;
+  }
   showToast(`Знайдено нову версію Linkor: v${info.version}. Завантажую...`);
   downloadUpdate();
 });
 
 window.nodusBridge?.onUpdateNotAvailable?.(async () => {
+  if (updateCheckMode === 'silent') {
+    updateCheckMode = 'manual';
+    return;
+  }
   updateReadyToInstall = false;
   renderUpdateInstallButton();
   if (!latestAppVersion) await loadAppVersion();
@@ -899,12 +960,17 @@ window.nodusBridge?.onUpdateDownloaded?.(() => {
 });
 
 window.nodusBridge?.onUpdateError?.((error) => {
+  if (updateCheckMode === 'silent') {
+    updateCheckMode = 'manual';
+    return;
+  }
   updateReadyToInstall = false;
   renderUpdateInstallButton();
   showToast(`Помилка оновлення: ${error?.message || 'невідома помилка'}`);
 });
 
 window.nodusBridge?.onUpdateChecking?.(() => {
+  if (updateCheckMode === 'silent') return;
   updateReadyToInstall = false;
   renderUpdateInstallButton();
   showToast('Перевіряю оновлення...');
@@ -1245,6 +1311,7 @@ async function doRegister() {
 
     saveState();
     showPage('hub');
+    setTimeout(() => startOnboardingTour({ force: true }), 120);
     showToast(`✓ ${tr('accountCreated')}, ${nick}`);
   } catch (error) {
     errEl.textContent = `⚠ Supabase registration failed: ${error.message}`;
@@ -1376,6 +1443,7 @@ function renderHub() {
     const { nodeCount, edgeCount, density } = getSpaceStats(space.id);
     const card = document.createElement('div');
     card.className = 'space-card';
+    card.dataset.tour = 'open-space';
     card.style.animationDelay = (spaces.indexOf(space) * 0.05) + 's';
     const initials = (space.name || 'NS').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
     card.innerHTML = `
@@ -1398,6 +1466,7 @@ function renderHub() {
   });
   const newCard = document.createElement('div');
   newCard.className = 'space-card space-card-new';
+  newCard.dataset.tour = 'create-space';
   newCard.innerHTML = `<div class="space-card-new-icon"></div><div class="space-card-new-label">${tr('newSpace')}</div><div class="space-card-new-sub">${tr('startClean')}</div>`;
   newCard.onclick = () => openNewSpaceModal();
   grid.appendChild(newCard);
@@ -1421,6 +1490,7 @@ function openSpace(id) {
   state.selectedNodeId = null;
   state.connectSource = null;
   showPage('engine');
+  emitLinkorEvent('space-opened', { id });
 }
 
 // ===== PROFILE MODAL =====
@@ -1569,9 +1639,9 @@ function openNewSpaceModal() {
   modal.querySelector('.modal-box')?.classList.remove('modal-box-wide');
   document.getElementById('modal-title').textContent = `// ${tr('newSpace')}`;
   document.getElementById('modal-body').innerHTML = `
-    <input class="modal-input" type="text" id="new-space-name" placeholder="${tr('newSpace')}..." autofocus>
+    <input class="modal-input" type="text" id="new-space-name" data-tour="space-title" placeholder="${tr('newSpace')}..." autofocus>
     <div class="modal-field-label">${tr('template')}</div>
-    <div class="template-grid">
+    <div class="template-grid" data-tour="templates">
       ${Object.keys(SPACE_TEMPLATES).map(id => {
         const tpl = getLocalizedTemplate(id);
         return `
@@ -1583,15 +1653,16 @@ function openNewSpaceModal() {
       }).join('')}
     </div>
     <div class="modal-field-label">${tr('visualTone')}</div>
-    <div class="modal-tone-row">
+    <div class="modal-tone-row" data-tour="space-color">
       ${COLORS.map((c, i) => `<button class="modal-tone ${c===newSpaceColor?'active':''}" style="--tone:${c}" onclick="selectSpaceColor('${c}',this)" type="button"><span>${String(i + 1).padStart(2, '0')}</span></button>`).join('')}
     </div>
     <div class="modal-actions">
-      <button class="modal-btn modal-btn-primary" onclick="createSpace()"><span>${tr('create')}</span></button>
+      <button class="modal-btn modal-btn-primary" onclick="createSpace()" data-tour="create-space-submit"><span>${tr('create')}</span></button>
       <button class="modal-btn modal-btn-secondary" onclick="closeModal()">${tr('cancel')}</button>
     </div>
   `;
   modal.style.display = 'flex';
+  emitLinkorEvent('space-modal-opened');
   setTimeout(() => {
     const input = document.getElementById('new-space-name');
     if (input) {
@@ -1644,6 +1715,7 @@ function createSpace() {
   closeModal();
   showToast(`✓ ${tr('spaceCreated')}: ${name}`);
   renderHub();
+  emitLinkorEvent('space-created', { id: space.id, name: space.name });
 }
 
 function createTemplateContent(spaceId, templateId) {
@@ -1952,6 +2024,7 @@ function createNodeEl(node) {
   )).join('');
   const div = document.createElement('div');
   div.className = 'node' + (node.type === 'subtopic' ? ' subtopic-node' : '');
+  div.dataset.tour = node.type === 'subtopic' ? 'subtopic-node' : 'node';
   div.id = 'node-' + node.id;
   div.style.left = node.x + 'px';
   div.style.top = node.y + 'px';
@@ -2171,6 +2244,7 @@ function createNode(x, y, title, desc, colorIdx, type = 'idea', options = {}) {
   if (world) world.appendChild(createNodeEl(state.nodes[id]));
   updateStats();
   selectNode(id);
+  emitLinkorEvent('node-created', { id, node: state.nodes[id], count: getSpaceNodes().length });
   if (!options.silent) showToast(`✓ ${tr('addNode')}`);
   return id;
 }
@@ -2252,6 +2326,8 @@ function addSubnode(e, parentId) {
   if (!id) return;
   const eid = 'e_' + (++state.edgeIdCounter);
   state.edges[eid] = createEdgeRecord(eid, state.currentSpaceId, parentId, id, 'bottom', 'top');
+  emitLinkorEvent('edge-created', { id: eid, edge: state.edges[eid] });
+  emitLinkorEvent('subtopic-created', { id, parentId, edgeId: eid });
   saveState();
   renderCanvas();
   showToast(`✓ ${tr('links')}`);
@@ -2368,6 +2444,7 @@ function createEdgeDirect(fromId, toId, options = {}) {
     sourceAnchor,
     targetAnchor
   );
+  emitLinkorEvent('edge-created', { id: eid, edge: state.edges[eid] });
   return true;
 }
 
@@ -3265,7 +3342,8 @@ function renderSettings(tab) {
       <div class="settings-group">
         <p style="color:var(--text-dim);line-height:1.6">${tr('aboutCopy')}</p>
         <p style="color:var(--text-dim);line-height:1.6">Версія: <span class="app-version-text">${latestAppVersion || '...'}</span></p>
-        <button class="hub-nav-btn" onclick="checkForUpdates()">Перевірити оновлення</button>
+        <button class="hub-nav-btn" onclick="checkForUpdates()" data-tour="check-updates">Перевірити оновлення</button>
+        <button class="hub-nav-btn" onclick="restartOnboardingTour()" data-tour="restart-tour">Повторити екскурс</button>
         <button class="hub-nav-btn" id="install-update-btn" onclick="installUpdate()" style="display:none">Перезапустити і встановити</button>
       </div>
     `;
@@ -3957,6 +4035,160 @@ function showToast(msg) {
   t._timer = setTimeout(() => t.classList.remove('show'), 2200);
 }
 
+// ===== ONBOARDING TOUR =====
+const ONBOARDING_COMPLETED_KEY = 'linkorOnboardingCompleted';
+const ONBOARDING_STEP_KEY = 'linkorOnboardingStep';
+let onboarding = { active: false, stepIndex: 0, waitingFor: null, nodeCreateCount: 0 };
+
+const ONBOARDING_STEPS = [
+  { target: '[data-tour="create-space"]', text: 'Тут створюється нове поле для твоїх ідей, планів або проєктів.', waitFor: 'space-modal-opened', nextLabel: 'Відкрити' },
+  { target: '[data-tour="templates"]', text: 'Тут можна обрати шаблон, щоб швидко стартувати з готовою структурою.' },
+  { target: '[data-tour="space-title"]', text: 'Тут введи назву, щоб легко знаходити цей простір пізніше.' },
+  { target: '[data-tour="space-color"]', text: 'Колір допомагає візуально відрізняти різні простори або ідеї.' },
+  { target: '[data-tour="create-space-submit"]', text: 'Створи поле. Екскурс дочекається цього і поведе тебе далі.', waitFor: 'space-created', nextLabel: 'Я створив поле' },
+  { target: '[data-tour="open-space"]', text: 'Чудово. Тепер відкрий створене поле, щоб перейти до карти.', waitFor: 'space-opened', nextLabel: 'Я відкрив поле' },
+  { target: '[data-tour="tools-panel"]', text: 'Тут знаходяться основні інструменти для роботи з картою.' },
+  { target: '[data-tour="add-node"]', text: 'Натисни Add node, щоб створити перший блок.', waitFor: 'node-created', nextLabel: 'Я створив блок' },
+  { target: '.node', text: 'Це твій перший блок. У ньому можна зберігати думки, задачі або ідеї.' },
+  { target: '[data-tour="quick-capture"], [data-tour="add-node"]', text: 'Створи ще один блок, щоб пов’язати ідеї між собою.', waitFor: 'second-node-created', nextLabel: 'Я створив другий блок' },
+  { target: '[data-tour="connect-tool"], .node-anchor', text: 'Тепер з’єднай два блоки: почни з точки на одному блоці і відпусти на іншому блоці.', waitFor: 'edge-created', nextLabel: 'Я створив зв’язок' },
+  { target: '#main-edges-svg, #canvas-wrap', text: 'Готово. Так Linkor допомагає будувати карту думок і бачити зв’язки.' },
+  { target: '.node-action-btn', text: 'Підтеми автоматично створюють дочірній блок і зв’язують його з основним.', waitFor: 'subtopic-created', nextLabel: 'Зрозуміло' },
+  { target: null, text: 'Екскурс завершено. Тепер можеш будувати власні системи в Linkor.', final: true }
+];
+
+function isOnboardingActive() {
+  return Boolean(onboarding.active);
+}
+
+function ensureOnboardingDom() {
+  if (document.getElementById('onboarding-overlay')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'onboarding-overlay';
+  overlay.className = 'onboarding-overlay';
+  overlay.innerHTML = `
+    <div class="onboarding-spotlight" id="onboarding-spotlight"></div>
+    <div class="onboarding-card" id="onboarding-card">
+      <div class="onboarding-progress" id="onboarding-progress"></div>
+      <div class="onboarding-text" id="onboarding-text"></div>
+      <div class="onboarding-actions">
+        <button onclick="prevOnboardingStep()" id="onboarding-back">Назад</button>
+        <button onclick="skipOnboardingTour()" class="ghost">Пропустити</button>
+        <button onclick="nextOnboardingStep()" id="onboarding-next">Далі</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function getOnboardingTarget(step) {
+  return step?.target ? document.querySelector(step.target) : null;
+}
+
+function positionOnboardingCard(target) {
+  const card = document.getElementById('onboarding-card');
+  const spotlight = document.getElementById('onboarding-spotlight');
+  if (!card || !spotlight) return;
+  if (!target) {
+    spotlight.style.display = 'none';
+    card.style.left = '50%';
+    card.style.top = '50%';
+    card.style.transform = 'translate(-50%, -50%)';
+    return;
+  }
+  const rect = target.getBoundingClientRect();
+  const pad = 10;
+  spotlight.style.display = '';
+  spotlight.style.left = `${rect.left - pad}px`;
+  spotlight.style.top = `${rect.top - pad}px`;
+  spotlight.style.width = `${rect.width + pad * 2}px`;
+  spotlight.style.height = `${rect.height + pad * 2}px`;
+  const cardWidth = 360;
+  const left = Math.max(18, Math.min(window.innerWidth - cardWidth - 18, rect.left));
+  const below = rect.bottom + 18;
+  const top = below + 190 < window.innerHeight ? below : Math.max(18, rect.top - 210);
+  card.style.left = `${left}px`;
+  card.style.top = `${top}px`;
+  card.style.transform = 'none';
+}
+
+function renderOnboardingStep() {
+  if (!onboarding.active) return;
+  ensureOnboardingDom();
+  const step = ONBOARDING_STEPS[onboarding.stepIndex] || ONBOARDING_STEPS[0];
+  document.getElementById('onboarding-overlay')?.classList.add('active');
+  document.getElementById('onboarding-progress').textContent = `Крок ${onboarding.stepIndex + 1} з ${ONBOARDING_STEPS.length}`;
+  document.getElementById('onboarding-text').textContent = step.text;
+  document.getElementById('onboarding-back').disabled = onboarding.stepIndex === 0;
+  document.getElementById('onboarding-next').textContent = step.final ? 'Завершити' : (step.nextLabel || 'Далі');
+  onboarding.waitingFor = step.waitFor || null;
+  positionOnboardingCard(getOnboardingTarget(step));
+  localStorage.setItem(ONBOARDING_STEP_KEY, String(onboarding.stepIndex));
+  renderOutdatedBanner();
+}
+
+function startOnboardingTour({ force = false } = {}) {
+  if (!force && localStorage.getItem(ONBOARDING_COMPLETED_KEY) === 'true') return;
+  onboarding.active = true;
+  onboarding.stepIndex = force ? 0 : Math.max(0, Math.min(Number(localStorage.getItem(ONBOARDING_STEP_KEY) || 0), ONBOARDING_STEPS.length - 1));
+  onboarding.nodeCreateCount = getSpaceNodes().length;
+  renderOnboardingStep();
+}
+
+function restartOnboardingTour() {
+  localStorage.removeItem(ONBOARDING_COMPLETED_KEY);
+  localStorage.removeItem(ONBOARDING_STEP_KEY);
+  showPage('hub');
+  setTimeout(() => startOnboardingTour({ force: true }), 80);
+}
+
+function completeOnboardingTour() {
+  onboarding.active = false;
+  onboarding.waitingFor = null;
+  localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
+  localStorage.removeItem(ONBOARDING_STEP_KEY);
+  document.getElementById('onboarding-overlay')?.classList.remove('active');
+  renderOutdatedBanner();
+}
+
+function skipOnboardingTour() {
+  completeOnboardingTour();
+}
+
+function nextOnboardingStep() {
+  if (!onboarding.active) return;
+  const step = ONBOARDING_STEPS[onboarding.stepIndex];
+  if (step?.final) {
+    completeOnboardingTour();
+    return;
+  }
+  onboarding.stepIndex = Math.min(ONBOARDING_STEPS.length - 1, onboarding.stepIndex + 1);
+  setTimeout(renderOnboardingStep, 40);
+}
+
+function prevOnboardingStep() {
+  if (!onboarding.active) return;
+  onboarding.stepIndex = Math.max(0, onboarding.stepIndex - 1);
+  renderOnboardingStep();
+}
+
+function handleOnboardingEvent(eventName) {
+  if (!onboarding.active) return;
+  if (eventName === 'node-created') {
+    onboarding.nodeCreateCount = Math.max(onboarding.nodeCreateCount, getSpaceNodes().length);
+    if (onboarding.waitingFor === 'second-node-created' && onboarding.nodeCreateCount >= 2) nextOnboardingStep();
+  }
+  if (onboarding.waitingFor === eventName) nextOnboardingStep();
+}
+
+['space-modal-opened', 'space-created', 'space-opened', 'node-created', 'edge-created', 'subtopic-created'].forEach(name => {
+  window.addEventListener(`linkor:${name}`, () => handleOnboardingEvent(name));
+});
+
+window.addEventListener('resize', () => {
+  if (onboarding.active) renderOnboardingStep();
+});
+
 // ===== EVENT LISTENERS =====
 document.addEventListener('DOMContentLoaded', () => {
   loadState();
@@ -3964,6 +4196,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (state.theme) applyTheme(state.theme, true);
   if (state.currentUser) showPage('hub');
   else showPage('gate');
+  if (state.currentUser && localStorage.getItem(ONBOARDING_COMPLETED_KEY) !== 'true') {
+    setTimeout(() => startOnboardingTour(), 180);
+  }
   setSyncStatus(state.hasUnsyncedChanges ? 'unsynced' : 'local');
   startAutoSyncTimer();
 
@@ -4087,6 +4322,10 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape' && document.getElementById('command-palette')?.style.display === 'flex') {
     closeCommandPalette();
+    return;
+  }
+  if (e.key === 'Escape' && isOnboardingActive()) {
+    completeOnboardingTour();
     return;
   }
   if (e.key === 'Escape') { cancelConnect(); closeNodeEditor(); setTool('select'); }

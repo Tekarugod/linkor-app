@@ -62,6 +62,15 @@ ipcMain.handle('app:check-updates', async () => {
   return { ok: true, message: 'Перевіряю оновлення...' };
 });
 
+ipcMain.handle('app:check-updates-silent', async () => {
+  if (!app.isPackaged) {
+    return { ok: false, silent: true };
+  }
+
+  await autoUpdater.checkForUpdates();
+  return { ok: true, silent: true };
+});
+
 ipcMain.handle('app:download-update', async () => {
   await autoUpdater.downloadUpdate();
   return { ok: true };
