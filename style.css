@@ -1697,25 +1697,76 @@ body::before {
   z-index: 5000;
   display: none;
   pointer-events: none;
-  background: rgba(1, 5, 12, 0.58);
-  backdrop-filter: blur(2px);
+  background: transparent;
+  backdrop-filter: none;
 }
 .onboarding-overlay.active {
   display: block;
+}
+.onboarding-overlay.welcome-mode {
+  background: rgba(1, 5, 12, 0.62);
+  backdrop-filter: blur(2px);
 }
 .onboarding-spotlight {
   position: fixed;
   border: 1px solid rgba(113, 239, 255, 0.78);
   border-radius: 10px;
+  pointer-events: none;
   box-shadow:
-    0 0 0 9999px rgba(1, 5, 12, 0.5),
+    0 0 0 9999px rgba(1, 5, 12, 0.62),
     0 0 28px rgba(0,245,255,0.34),
     inset 0 0 18px rgba(0,245,255,0.08);
   transition: all 0.2s ease;
 }
+.onboarding-welcome {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100vw - 40px));
+  border: 1px solid rgba(0,245,255,0.42);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(10,24,44,0.98), rgba(4,9,20,0.98)),
+    rgba(4,8,16,0.98);
+  box-shadow: 0 30px 90px rgba(0,0,0,0.62), 0 0 44px rgba(0,245,255,0.16);
+  padding: 30px;
+  pointer-events: auto;
+}
+.onboarding-welcome-kicker {
+  color: var(--accent);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+.onboarding-welcome h2 {
+  margin: 0 0 12px;
+  color: #eaffff;
+  font-family: 'Orbitron', monospace;
+  font-size: 28px;
+  letter-spacing: 0;
+  text-shadow: 0 0 20px rgba(0,245,255,0.28);
+}
+.onboarding-welcome p {
+  margin: 0;
+  color: #b9d5e4;
+  font-size: 17px;
+  line-height: 1.5;
+}
+.onboarding-version {
+  margin-top: 18px;
+  color: #7fa6ba;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px;
+}
+.welcome-actions {
+  justify-content: flex-start;
+  margin-top: 24px;
+}
 .onboarding-card {
   position: fixed;
-  width: min(360px, calc(100vw - 36px));
+  width: min(340px, calc(100vw - 36px));
   border: 1px solid rgba(0,245,255,0.42);
   border-radius: 8px;
   background: linear-gradient(180deg, rgba(9,20,38,0.98), rgba(4,9,20,0.98));
@@ -1729,10 +1780,25 @@ body::before {
   font-size: 11px;
   margin-bottom: 8px;
 }
+.onboarding-title {
+  color: #eaffff;
+  font-family: 'Orbitron', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+  margin-bottom: 7px;
+}
 .onboarding-text {
   color: #d7edf8;
   font-size: 15px;
   line-height: 1.45;
+}
+.onboarding-wait {
+  min-height: 16px;
+  margin-top: 10px;
+  color: #7fa6ba;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
 }
 .onboarding-actions {
   display: flex;

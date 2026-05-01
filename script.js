@@ -829,6 +829,9 @@ async function loadAppVersion() {
     document.querySelectorAll('.app-version-text').forEach(el => {
       el.textContent = version;
     });
+    document.querySelectorAll('.onboarding-version-value').forEach(el => {
+      el.textContent = `v${version}`;
+    });
   } catch (error) {
     console.warn('Version load failed:', error);
   }
@@ -2025,6 +2028,7 @@ function createNodeEl(node) {
   const div = document.createElement('div');
   div.className = 'node' + (node.type === 'subtopic' ? ' subtopic-node' : '');
   div.dataset.tour = node.type === 'subtopic' ? 'subtopic-node' : 'node';
+  div.dataset.nodeId = node.id;
   div.id = 'node-' + node.id;
   div.style.left = node.x + 'px';
   div.style.top = node.y + 'px';
@@ -2043,7 +2047,7 @@ function createNodeEl(node) {
     ${tagsHtml ? `<div class="node-tags">${tagsHtml}</div>` : ''}
     <div class="node-actions">
       <button class="node-action-btn" onclick="editNode(event,'${node.id}')">${tr('edit')}</button>
-      <button class="node-action-btn" onclick="addSubnode(event,'${node.id}')">${tr('subnode')}</button>
+      <button class="node-action-btn" onclick="addSubnode(event,'${node.id}')" data-tour="subtopic-button">${tr('subnode')}</button>
       <button class="node-action-btn" onclick="startConnect('${node.id}','right',event)">${tr('addLink')}</button>
       <button class="node-action-btn danger" onclick="deleteNode(event,'${node.id}')">${tr('del')}</button>
     </div>
@@ -4038,23 +4042,31 @@ function showToast(msg) {
 // ===== ONBOARDING TOUR =====
 const ONBOARDING_COMPLETED_KEY = 'linkorOnboardingCompleted';
 const ONBOARDING_STEP_KEY = 'linkorOnboardingStep';
-let onboarding = { active: false, stepIndex: 0, waitingFor: null, nodeCreateCount: 0 };
+let onboarding = {
+  active: false,
+  mode: 'welcome',
+  stepIndex: 0,
+  waitingFor: null,
+  nodeCreateCount: 0,
+  lastNodeId: null,
+  targetTimer: null,
+  targetStartedAt: 0
+};
 
 const ONBOARDING_STEPS = [
-  { target: '[data-tour="create-space"]', text: 'Тут створюється нове поле для твоїх ідей, планів або проєктів.', waitFor: 'space-modal-opened', nextLabel: 'Відкрити' },
-  { target: '[data-tour="templates"]', text: 'Тут можна обрати шаблон, щоб швидко стартувати з готовою структурою.' },
-  { target: '[data-tour="space-title"]', text: 'Тут введи назву, щоб легко знаходити цей простір пізніше.' },
-  { target: '[data-tour="space-color"]', text: 'Колір допомагає візуально відрізняти різні простори або ідеї.' },
-  { target: '[data-tour="create-space-submit"]', text: 'Створи поле. Екскурс дочекається цього і поведе тебе далі.', waitFor: 'space-created', nextLabel: 'Я створив поле' },
-  { target: '[data-tour="open-space"]', text: 'Чудово. Тепер відкрий створене поле, щоб перейти до карти.', waitFor: 'space-opened', nextLabel: 'Я відкрив поле' },
-  { target: '[data-tour="tools-panel"]', text: 'Тут знаходяться основні інструменти для роботи з картою.' },
-  { target: '[data-tour="add-node"]', text: 'Натисни Add node, щоб створити перший блок.', waitFor: 'node-created', nextLabel: 'Я створив блок' },
-  { target: '.node', text: 'Це твій перший блок. У ньому можна зберігати думки, задачі або ідеї.' },
-  { target: '[data-tour="quick-capture"], [data-tour="add-node"]', text: 'Створи ще один блок, щоб пов’язати ідеї між собою.', waitFor: 'second-node-created', nextLabel: 'Я створив другий блок' },
-  { target: '[data-tour="connect-tool"], .node-anchor', text: 'Тепер з’єднай два блоки: почни з точки на одному блоці і відпусти на іншому блоці.', waitFor: 'edge-created', nextLabel: 'Я створив зв’язок' },
-  { target: '#main-edges-svg, #canvas-wrap', text: 'Готово. Так Linkor допомагає будувати карту думок і бачити зв’язки.' },
-  { target: '.node-action-btn', text: 'Підтеми автоматично створюють дочірній блок і зв’язують його з основним.', waitFor: 'subtopic-created', nextLabel: 'Зрозуміло' },
-  { target: null, text: 'Екскурс завершено. Тепер можеш будувати власні системи в Linkor.', final: true }
+  { target: '[data-tour="create-space"]', title: 'Створи простір', text: 'Натисни тут, щоб створити нове поле для ідей, планів або проєктів.', waitFor: 'space-modal-opened' },
+  { target: '[data-tour="space-title"]', title: 'Назва простору', text: 'Введи назву, щоб легко знаходити цей простір пізніше.' },
+  { target: '[data-tour="templates"]', title: 'Шаблони', text: 'Тут можна обрати готовий шаблон для швидкого старту.' },
+  { target: '[data-tour="space-color"]', title: 'Візуальний тон', text: 'Колір допомагає відрізняти різні простори.' },
+  { target: '[data-tour="create-space-submit"]', title: 'Створення', text: 'Натисни, щоб створити простір і перейти до карти.', waitFor: 'space-created' },
+  { target: '[data-tour="tools-panel"]', title: 'Панель інструментів', text: 'Тут знаходяться основні інструменти для роботи з картою.' },
+  { target: '[data-tour="add-node"]', title: 'Перший блок', text: 'Натисни Add node, щоб створити перший блок.', waitFor: 'node-created' },
+  { target: () => onboarding.lastNodeId ? `#node-${onboarding.lastNodeId}` : '.node', title: 'Блок', text: 'Блок зберігає думку, задачу або ідею. Його можна рухати та з’єднувати.' },
+  { target: '[data-tour="add-node"]', title: 'Другий блок', text: 'Створи ще один блок, щоб побудувати зв’язок.', waitFor: 'second-node-created' },
+  { target: '[data-tour="connect-tool"]', title: 'Зв’язок', text: 'Обери Connect, потім потягни лінію від одного блоку до іншого.', waitFor: 'edge-created' },
+  { target: '[data-tour="graph-canvas"]', title: 'Готово', text: 'Тепер ти бачиш, як ідеї пов’язані між собою.' },
+  { target: '[data-tour="subtopic-button"]', title: 'Підтеми', text: 'Підтеми створюють дочірні блоки й автоматично під’єднують їх до основної ідеї.', optional: true },
+  { target: null, title: 'Екскурсію завершено', text: 'Тепер можеш створювати власні карти в Linkor.', final: true }
 ];
 
 function isOnboardingActive() {
@@ -4068,9 +4080,21 @@ function ensureOnboardingDom() {
   overlay.className = 'onboarding-overlay';
   overlay.innerHTML = `
     <div class="onboarding-spotlight" id="onboarding-spotlight"></div>
+    <div class="onboarding-welcome" id="onboarding-welcome">
+      <div class="onboarding-welcome-kicker">LINKOR TOUR</div>
+      <h2>Вітаємо в Linkor</h2>
+      <p>Linkor допомагає будувати карти ідей, планів і проєктів через блоки та зв’язки.</p>
+      <div class="onboarding-version">Поточна версія: <span class="onboarding-version-value">${latestAppVersion ? `v${latestAppVersion}` : '...'}</span></div>
+      <div class="onboarding-actions welcome-actions">
+        <button onclick="beginOnboardingTour()">Почати екскурсію</button>
+        <button onclick="skipOnboardingTour()" class="ghost">Пропустити</button>
+      </div>
+    </div>
     <div class="onboarding-card" id="onboarding-card">
       <div class="onboarding-progress" id="onboarding-progress"></div>
+      <div class="onboarding-title" id="onboarding-title"></div>
       <div class="onboarding-text" id="onboarding-text"></div>
+      <div class="onboarding-wait" id="onboarding-wait"></div>
       <div class="onboarding-actions">
         <button onclick="prevOnboardingStep()" id="onboarding-back">Назад</button>
         <button onclick="skipOnboardingTour()" class="ghost">Пропустити</button>
@@ -4082,7 +4106,9 @@ function ensureOnboardingDom() {
 }
 
 function getOnboardingTarget(step) {
-  return step?.target ? document.querySelector(step.target) : null;
+  if (!step?.target) return null;
+  const selector = typeof step.target === 'function' ? step.target() : step.target;
+  return selector ? document.querySelector(selector) : null;
 }
 
 function positionOnboardingCard(target) {
@@ -4103,35 +4129,125 @@ function positionOnboardingCard(target) {
   spotlight.style.top = `${rect.top - pad}px`;
   spotlight.style.width = `${rect.width + pad * 2}px`;
   spotlight.style.height = `${rect.height + pad * 2}px`;
-  const cardWidth = 360;
-  const left = Math.max(18, Math.min(window.innerWidth - cardWidth - 18, rect.left));
-  const below = rect.bottom + 18;
-  const top = below + 190 < window.innerHeight ? below : Math.max(18, rect.top - 210);
+  target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  const cardWidth = 340;
+  const cardHeight = 210;
+  const preferRight = rect.right + cardWidth + 24 < window.innerWidth;
+  const preferLeft = rect.left - cardWidth - 24 > 0;
+  const left = preferRight
+    ? rect.right + 18
+    : preferLeft
+      ? rect.left - cardWidth - 18
+      : Math.max(18, Math.min(window.innerWidth - cardWidth - 18, rect.left));
+  const top = Math.max(18, Math.min(window.innerHeight - cardHeight - 18, rect.top + rect.height / 2 - cardHeight / 2));
   card.style.left = `${left}px`;
   card.style.top = `${top}px`;
   card.style.transform = 'none';
+}
+
+function renderOnboardingWelcome() {
+  ensureOnboardingDom();
+  const overlay = document.getElementById('onboarding-overlay');
+  overlay?.classList.add('active', 'welcome-mode');
+  overlay?.classList.remove('tour-mode');
+  document.getElementById('onboarding-card').style.display = 'none';
+  document.getElementById('onboarding-spotlight').style.display = 'none';
+  const welcome = document.getElementById('onboarding-welcome');
+  welcome.innerHTML = `
+    <div class="onboarding-welcome-kicker">LINKOR TOUR</div>
+    <h2>Вітаємо в Linkor</h2>
+    <p>Linkor допомагає будувати карти ідей, планів і проєктів через блоки та зв’язки.</p>
+    <div class="onboarding-version">Поточна версія: <span class="onboarding-version-value">${latestAppVersion ? `v${latestAppVersion}` : '...'}</span></div>
+    <div class="onboarding-actions welcome-actions">
+      <button onclick="beginOnboardingTour()">Почати екскурсію</button>
+      <button onclick="skipOnboardingTour()" class="ghost">Пропустити</button>
+    </div>
+  `;
+  welcome.style.display = 'block';
+  loadAppVersion();
+  renderOutdatedBanner();
 }
 
 function renderOnboardingStep() {
   if (!onboarding.active) return;
   ensureOnboardingDom();
   const step = ONBOARDING_STEPS[onboarding.stepIndex] || ONBOARDING_STEPS[0];
-  document.getElementById('onboarding-overlay')?.classList.add('active');
+  if (step.final) {
+    renderOnboardingFinal(step);
+    return;
+  }
+  const target = getOnboardingTarget(step);
+  if (step.target && !target) {
+    waitForOnboardingTarget(step);
+    return;
+  }
+  const overlay = document.getElementById('onboarding-overlay');
+  overlay?.classList.add('active', 'tour-mode');
+  overlay?.classList.remove('welcome-mode');
+  document.getElementById('onboarding-welcome').style.display = 'none';
+  document.getElementById('onboarding-card').style.display = 'block';
   document.getElementById('onboarding-progress').textContent = `Крок ${onboarding.stepIndex + 1} з ${ONBOARDING_STEPS.length}`;
+  document.getElementById('onboarding-title').textContent = step.title || '';
   document.getElementById('onboarding-text').textContent = step.text;
   document.getElementById('onboarding-back').disabled = onboarding.stepIndex === 0;
-  document.getElementById('onboarding-next').textContent = step.final ? 'Завершити' : (step.nextLabel || 'Далі');
+  const next = document.getElementById('onboarding-next');
+  const wait = document.getElementById('onboarding-wait');
+  next.textContent = step.waitFor ? 'Очікую дію' : 'Далі';
+  next.disabled = Boolean(step.waitFor);
+  wait.textContent = step.waitFor ? 'Натисни підсвічений елемент і виконай дію, щоб продовжити.' : '';
   onboarding.waitingFor = step.waitFor || null;
-  positionOnboardingCard(getOnboardingTarget(step));
+  positionOnboardingCard(target);
   localStorage.setItem(ONBOARDING_STEP_KEY, String(onboarding.stepIndex));
   renderOutdatedBanner();
 }
 
-function startOnboardingTour({ force = false } = {}) {
+function waitForOnboardingTarget(step) {
+  clearTimeout(onboarding.targetTimer);
+  document.getElementById('onboarding-overlay')?.classList.remove('active');
+  const now = Date.now();
+  if (!onboarding.targetStartedAt) onboarding.targetStartedAt = now;
+  if (now - onboarding.targetStartedAt > 5000 || step.optional) {
+    onboarding.targetStartedAt = 0;
+    nextOnboardingStep();
+    return;
+  }
+  onboarding.targetTimer = setTimeout(renderOnboardingStep, 250);
+}
+
+function renderOnboardingFinal(step) {
+  const overlay = document.getElementById('onboarding-overlay');
+  overlay?.classList.add('active', 'welcome-mode');
+  overlay?.classList.remove('tour-mode');
+  document.getElementById('onboarding-card').style.display = 'none';
+  document.getElementById('onboarding-spotlight').style.display = 'none';
+  const welcome = document.getElementById('onboarding-welcome');
+  welcome.style.display = 'block';
+  welcome.innerHTML = `
+    <div class="onboarding-welcome-kicker">TOUR COMPLETE</div>
+    <h2>${escHtml(step.title)}</h2>
+    <p>${escHtml(step.text)}</p>
+    <div class="onboarding-actions welcome-actions">
+      <button onclick="completeOnboardingTour()">Почати роботу</button>
+    </div>
+  `;
+}
+
+function startOnboardingTour({ force = false, welcome = true } = {}) {
   if (!force && localStorage.getItem(ONBOARDING_COMPLETED_KEY) === 'true') return;
   onboarding.active = true;
-  onboarding.stepIndex = force ? 0 : Math.max(0, Math.min(Number(localStorage.getItem(ONBOARDING_STEP_KEY) || 0), ONBOARDING_STEPS.length - 1));
+  onboarding.mode = welcome ? 'welcome' : 'tour';
+  onboarding.stepIndex = force || welcome ? 0 : Math.max(0, Math.min(Number(localStorage.getItem(ONBOARDING_STEP_KEY) || 0), ONBOARDING_STEPS.length - 1));
   onboarding.nodeCreateCount = getSpaceNodes().length;
+  onboarding.lastNodeId = null;
+  onboarding.targetStartedAt = 0;
+  if (welcome) renderOnboardingWelcome();
+  else renderOnboardingStep();
+}
+
+function beginOnboardingTour() {
+  onboarding.mode = 'tour';
+  onboarding.stepIndex = 0;
+  onboarding.targetStartedAt = 0;
   renderOnboardingStep();
 }
 
@@ -4139,12 +4255,13 @@ function restartOnboardingTour() {
   localStorage.removeItem(ONBOARDING_COMPLETED_KEY);
   localStorage.removeItem(ONBOARDING_STEP_KEY);
   showPage('hub');
-  setTimeout(() => startOnboardingTour({ force: true }), 80);
+  setTimeout(() => startOnboardingTour({ force: true, welcome: true }), 80);
 }
 
 function completeOnboardingTour() {
   onboarding.active = false;
   onboarding.waitingFor = null;
+  clearTimeout(onboarding.targetTimer);
   localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
   localStorage.removeItem(ONBOARDING_STEP_KEY);
   document.getElementById('onboarding-overlay')?.classList.remove('active');
@@ -4162,7 +4279,9 @@ function nextOnboardingStep() {
     completeOnboardingTour();
     return;
   }
+  if (step?.waitFor) return;
   onboarding.stepIndex = Math.min(ONBOARDING_STEPS.length - 1, onboarding.stepIndex + 1);
+  onboarding.targetStartedAt = 0;
   setTimeout(renderOnboardingStep, 40);
 }
 
@@ -4172,13 +4291,29 @@ function prevOnboardingStep() {
   renderOnboardingStep();
 }
 
+function advanceOnboardingStep(delay = 120) {
+  onboarding.stepIndex = Math.min(ONBOARDING_STEPS.length - 1, onboarding.stepIndex + 1);
+  onboarding.targetStartedAt = 0;
+  setTimeout(renderOnboardingStep, delay);
+}
+
 function handleOnboardingEvent(eventName) {
   if (!onboarding.active) return;
   if (eventName === 'node-created') {
     onboarding.nodeCreateCount = Math.max(onboarding.nodeCreateCount, getSpaceNodes().length);
-    if (onboarding.waitingFor === 'second-node-created' && onboarding.nodeCreateCount >= 2) nextOnboardingStep();
+    onboarding.lastNodeId = state.selectedNodeId || onboarding.lastNodeId;
+    if (onboarding.waitingFor === 'second-node-created' && onboarding.nodeCreateCount >= 2) {
+      advanceOnboardingStep();
+      return;
+    }
   }
-  if (onboarding.waitingFor === eventName) nextOnboardingStep();
+  if (eventName === 'space-created' && onboarding.waitingFor === 'space-created') {
+    const newest = state.spaces[0];
+    if (newest) setTimeout(() => openSpace(newest.id), 120);
+  }
+  if (onboarding.waitingFor === eventName) {
+    advanceOnboardingStep(160);
+  }
 }
 
 ['space-modal-opened', 'space-created', 'space-opened', 'node-created', 'edge-created', 'subtopic-created'].forEach(name => {
