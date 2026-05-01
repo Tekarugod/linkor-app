@@ -1,9 +1,9 @@
 {
-  "name": "nodus-ai",
-  "version": "1.0.0",
-  "description": "Nodus AI desktop app",
+  "name": "Linkor",
+  "version": "1.0.2",
+  "description": "Linkor desktop app",
   "main": "main.js",
-  "author": "Nodus AI",
+  "author": "Linkor org.",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
@@ -14,8 +14,8 @@
     "electron-builder": "latest"
   },
   "build": {
-    "appId": "com.nodus.ai",
-    "productName": "Nodus AI",
+    "appId": "com.linkor.app",
+    "productName": "Linkor",
     "directories": {
       "output": "dist"
     },
@@ -25,6 +25,7 @@
       "neurospace.html",
       "script.js",
       "style.css",
+      "supabaseClient.js",
       "assets/**/*"
     ],
     "win": {
