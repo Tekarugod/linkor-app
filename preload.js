@@ -13,5 +13,13 @@ contextBridge.exposeInMainWorld('nodusBridge', {
   appQuit: () => ipcRenderer.invoke('app:quit'),
   getAppVersion: () => ipcRenderer.invoke('app:version'),
   checkForUpdates: () => ipcRenderer.invoke('app:check-updates'),
+  downloadUpdate: () => ipcRenderer.invoke('app:download-update'),
+  installUpdate: () => ipcRenderer.invoke('app:install-update'),
+  onUpdateChecking: (callback) => ipcRenderer.on('update:checking', callback),
+  onUpdateAvailable: (callback) => ipcRenderer.on('update:available', (_event, data) => callback(data)),
+  onUpdateNotAvailable: (callback) => ipcRenderer.on('update:not-available', (_event, data) => callback(data)),
+  onUpdateProgress: (callback) => ipcRenderer.on('update:progress', (_event, data) => callback(data)),
+  onUpdateDownloaded: (callback) => ipcRenderer.on('update:downloaded', (_event, data) => callback(data)),
+  onUpdateError: (callback) => ipcRenderer.on('update:error', (_event, data) => callback(data)),
   openExternal: (url) => ipcRenderer.invoke('app:open-external', url)
 });

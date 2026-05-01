@@ -7,7 +7,8 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win nsis portable"
+    "build": "electron-builder --win nsis",
+    "publish": "electron-builder --win nsis --publish always"
   },
   "devDependencies": {
     "electron": "latest",
@@ -29,19 +30,26 @@
       "assets/**/*"
     ],
     "win": {
-      "target": [
-        "nsis",
-        "portable"
-      ],
+      "target": "nsis",
       "icon": "assets/icon.ico",
       "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Tekarugod",
+      "repo": "linkor-app",
+      "releaseType": "release"
     }
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.105.1"
+    "@supabase/supabase-js": "^2.105.1",
+    "electron-updater": "^6.8.3"
   }
 }

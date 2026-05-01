@@ -1,8 +1,45 @@
 const { supabase } = require('./supabaseClient');
 const path = require('path');
 const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 
 let currentSupabaseUserId = null;
+let mainWindow = null;
+
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
+
+function sendUpdateStatus(channel, data = {}) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, data);
+  }
+}
+
+autoUpdater.on('checking-for-update', () => {
+  sendUpdateStatus('update:checking');
+});
+
+autoUpdater.on('update-available', (info) => {
+  sendUpdateStatus('update:available', info);
+});
+
+autoUpdater.on('update-not-available', (info) => {
+  sendUpdateStatus('update:not-available', info);
+});
+
+autoUpdater.on('download-progress', (progress) => {
+  sendUpdateStatus('update:progress', progress);
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+  sendUpdateStatus('update:downloaded', info);
+});
+
+autoUpdater.on('error', (error) => {
+  sendUpdateStatus('update:error', {
+    message: error?.message || 'Unknown update error'
+  });
+});
 
 ipcMain.handle('app:quit', async () => {
   app.quit();
@@ -16,51 +53,23 @@ ipcMain.handle('app:open-external', async (_event, url) => {
   return { ok: true };
 });
 
-function isVersionGreater(latestVersion, currentVersion) {
-  const normalize = (version) => String(version || '')
-    .replace(/^v/i, '')
-    .split('.')
-    .map(part => parseInt(part, 10) || 0);
-
-  const latest = normalize(latestVersion);
-  const current = normalize(currentVersion);
-  const length = Math.max(latest.length, current.length);
-
-  for (let i = 0; i < length; i++) {
-    if ((latest[i] || 0) > (current[i] || 0)) return true;
-    if ((latest[i] || 0) < (current[i] || 0)) return false;
-  }
-
-  return false;
-}
-
 ipcMain.handle('app:check-updates', async () => {
-  const currentVersion = app.getVersion();
-
-  try {
-    const updateUrl = 'https://raw.githubusercontent.com/Tekarugod/linkor-updates/main/latest.json?t=' + Date.now();
-    const response = await fetch(updateUrl);
-    if (!response.ok) throw new Error('Update check failed: ' + response.status);
-
-    const latest = await response.json();
-    console.log('Update URL:', latest.url);
-    const latestVersion = latest.version || currentVersion;
-    const hasUpdate = isVersionGreater(latestVersion, currentVersion);
-    const displayLatestVersion = String(latestVersion).startsWith('v') ? latestVersion : 'v' + latestVersion;
-
-    return {
-      ok: true,
-      hasUpdate,
-      currentVersion,
-      latestVersion,
-      url: latest.url || '',
-      notes: latest.notes || '',
-      message: hasUpdate ? 'Доступна нова версія ' + displayLatestVersion : 'У вас остання версія'
-    };
-  } catch (error) {
-    console.warn('Update check failed:', error);
-    return { ok: false, message: 'Не вдалося перевірити оновлення' };
+  if (!app.isPackaged) {
+    return { ok: false, message: 'Оновлення працюють тільки у встановленій production-версії.' };
   }
+
+  await autoUpdater.checkForUpdates();
+  return { ok: true, message: 'Перевіряю оновлення...' };
+});
+
+ipcMain.handle('app:download-update', async () => {
+  await autoUpdater.downloadUpdate();
+  return { ok: true };
+});
+
+ipcMain.handle('app:install-update', () => {
+  autoUpdater.quitAndInstall(false, true);
+  return { ok: true };
 });
 
 async function getCurrentSupabaseUserId() {
@@ -349,7 +358,7 @@ ipcMain.handle('cloud:pull', async () => {
 function createWindow() {
   Menu.setApplicationMenu(null);
 
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1000,
@@ -363,7 +372,11 @@ function createWindow() {
     }
   });
 
-  win.loadFile(path.join(__dirname, 'neurospace.html'));
+  mainWindow.loadFile(path.join(__dirname, 'neurospace.html'));
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
 app.whenReady().then(() => {

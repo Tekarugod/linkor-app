@@ -817,16 +817,55 @@ async function loadAppVersion() {
 
 async function checkForUpdates() {
   try {
+    showToast('Перевіряю оновлення...');
     const result = await window.nodusBridge?.checkForUpdates?.();
-    if (result?.hasUpdate && result.url) {
-      await window.nodusBridge?.openExternal?.(result.url);
-    }
-    showToast(result?.message || 'Не вдалося перевірити оновлення');
+    if (result?.message) showToast(result.message);
   } catch (error) {
     console.warn('Update check failed:', error);
     showToast(`Не вдалося перевірити оновлення: ${error.message}`);
   }
 }
+
+async function downloadUpdate() {
+  try {
+    showToast('Скачую оновлення...');
+    await window.nodusBridge?.downloadUpdate?.();
+  } catch (error) {
+    console.warn('Update download failed:', error);
+    showToast(`Не вдалося скачати оновлення: ${error.message}`);
+  }
+}
+
+async function installUpdate() {
+  try {
+    await window.nodusBridge?.installUpdate?.();
+  } catch (error) {
+    console.warn('Update install failed:', error);
+    showToast(`Не вдалося встановити оновлення: ${error.message}`);
+  }
+}
+
+window.nodusBridge?.onUpdateAvailable?.((info) => {
+  showToast(`Доступна нова версія: v${info.version}. Починаю скачування...`);
+  downloadUpdate();
+});
+
+window.nodusBridge?.onUpdateNotAvailable?.(() => {
+  showToast('У тебе вже остання версія.');
+});
+
+window.nodusBridge?.onUpdateProgress?.((progress) => {
+  showToast(`Скачування оновлення: ${progress.percent}%`);
+});
+
+window.nodusBridge?.onUpdateDownloaded?.(() => {
+  showToast('Оновлення скачано. Перезапускаю Linkor...');
+  setTimeout(() => installUpdate(), 1000);
+});
+
+window.nodusBridge?.onUpdateError?.((error) => {
+  showToast(`Помилка оновлення: ${error.message}`);
+});
 
 function setText(selector, value) {
   const el = document.querySelector(selector);
