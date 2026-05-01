@@ -55,7 +55,7 @@ ipcMain.handle('app:open-external', async (_event, url) => {
 
 ipcMain.handle('app:check-updates', async () => {
   if (!app.isPackaged) {
-    return { ok: false, message: 'Оновлення працюють тільки у встановленій production-версії.' };
+    return { ok: false, message: 'Оновлення доступні тільки у встановленій production-версії Linkor.' };
   }
 
   await autoUpdater.checkForUpdates();
@@ -363,7 +363,7 @@ function createWindow() {
     height: 900,
     minWidth: 1000,
     minHeight: 700,
-    title: 'Nodus AI',
+    title: 'Linkor',
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     webPreferences: {
       contextIsolation: true,

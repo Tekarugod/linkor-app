@@ -1,6 +1,8 @@
-// ===== NEUROSPACE v2.1 FINAL =====
-const BRAND_NAME = 'Nodus AI';
+// ===== LINKOR v2.1 FINAL =====
+const BRAND_NAME = 'Linkor';
 const BRAND_TAGLINE = 'thinking graph engine';
+let latestAppVersion = '';
+let updateReadyToInstall = false;
 
 let state = {
   users: {},
@@ -804,15 +806,24 @@ function showPage(id) {
 }
 
 async function loadAppVersion() {
-  const el = document.getElementById('app-version');
-  if (!el) return;
-
   try {
     const version = await window.nodusBridge?.getAppVersion?.();
-    if (version) el.textContent = `v${version}`;
+    if (!version) return;
+
+    latestAppVersion = version;
+    const hubVersion = document.getElementById('app-version');
+    if (hubVersion) hubVersion.textContent = `v${version}`;
+    document.querySelectorAll('.app-version-text').forEach(el => {
+      el.textContent = version;
+    });
   } catch (error) {
     console.warn('Version load failed:', error);
   }
+}
+
+function renderUpdateInstallButton() {
+  const button = document.getElementById('install-update-btn');
+  if (button) button.style.display = updateReadyToInstall ? 'inline-flex' : 'none';
 }
 
 async function checkForUpdates() {
@@ -851,16 +862,18 @@ window.nodusBridge?.onUpdateAvailable?.((info) => {
 });
 
 window.nodusBridge?.onUpdateNotAvailable?.(() => {
-  showToast('У тебе вже остання версія.');
+  showToast('У вас остання версія Linkor.');
 });
 
 window.nodusBridge?.onUpdateProgress?.((progress) => {
-  showToast(`Скачування оновлення: ${progress.percent}%`);
+  const percent = Math.max(0, Math.min(100, Math.round(progress?.percent || 0)));
+  showToast(`Скачування оновлення: ${percent}%`);
 });
 
 window.nodusBridge?.onUpdateDownloaded?.(() => {
-  showToast('Оновлення скачано. Перезапускаю Linkor...');
-  setTimeout(() => installUpdate(), 1000);
+  updateReadyToInstall = true;
+  renderUpdateInstallButton();
+  showToast('Оновлення завантажено. Перезапустіть Linkor для встановлення.');
 });
 
 window.nodusBridge?.onUpdateError?.((error) => {
@@ -884,7 +897,7 @@ function setPlaceholder(selector, value) {
 
 function applyStaticTranslations() {
   document.documentElement.lang = state.language || 'uk';
-  document.title = `${BRAND_NAME} — Thinking Graph`;
+  document.title = BRAND_NAME;
   document.querySelectorAll('.brand-logo span:last-child').forEach(el => { el.textContent = BRAND_NAME; });
   setText('.gate-subtitle', `// ${BRAND_TAGLINE}`);
   setText('.gate-tabs .gate-tab:nth-child(1)', tr('login'));
@@ -2866,9 +2879,13 @@ function renderSettings(tab) {
       <div class="settings-section-sub">// ${tr('aboutSub')}</div>
       <div class="settings-group">
         <p style="color:var(--text-dim);line-height:1.6">${tr('aboutCopy')}</p>
+        <p style="color:var(--text-dim);line-height:1.6">Версія: <span class="app-version-text">${latestAppVersion || '...'}</span></p>
         <button class="hub-nav-btn" onclick="checkForUpdates()">Перевірити оновлення</button>
+        <button class="hub-nav-btn" id="install-update-btn" onclick="installUpdate()" style="display:none">Перезапустити і встановити</button>
       </div>
     `;
+    loadAppVersion();
+    renderUpdateInstallButton();
   }
 }
 
