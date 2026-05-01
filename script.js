@@ -56,7 +56,8 @@ const NODE_TYPES = {
   task: { label: 'Task', short: 'TK', color: '#00ff88' },
   question: { label: 'Question', short: 'Q', color: '#ffe600' },
   resource: { label: 'Resource', short: 'RS', color: '#00bfff' },
-  decision: { label: 'Decision', short: 'DC', color: '#ff006e' }
+  decision: { label: 'Decision', short: 'DC', color: '#ff006e' },
+  subtopic: { label: 'Subtopic', short: 'SUB', color: '#8bf3ff' }
 };
 const SPACE_TEMPLATES = {
   blank: {
@@ -632,6 +633,7 @@ function restoreGraphState(snapshot) {
   state.spaces = JSON.parse(JSON.stringify(snapshot.spaces || []));
   state.nodes = JSON.parse(JSON.stringify(snapshot.nodes || {}));
   state.edges = JSON.parse(JSON.stringify(snapshot.edges || {}));
+  normalizeGraphData();
   state.currentSpaceId = snapshot.currentSpaceId || state.currentSpaceId;
   state.nodeIdCounter = snapshot.nodeIdCounter || state.nodeIdCounter;
   state.edgeIdCounter = snapshot.edgeIdCounter || state.edgeIdCounter;
@@ -710,11 +712,13 @@ function loadState() {
       state.spaceIdCounter = saved.spaceIdCounter || 1;
     }
     hydrateCurrentUserData();
+    normalizeGraphData();
   } catch(e) { console.error('Load error:', e); }
 }
 
 function saveState(options = {}) {
   try {
+    normalizeGraphData();
     if (state.currentUser && !state.isCloudLoading && options.markUnsynced !== false) {
       state.hasUnsyncedChanges = true;
       setSyncStatus('unsynced', 'Local changes are not synced yet');
@@ -773,10 +777,12 @@ function hydrateCurrentUserData() {
   state.nodeIdCounter = user.data.nodeIdCounter || 1;
   state.edgeIdCounter = user.data.edgeIdCounter || 1;
   state.spaceIdCounter = user.data.spaceIdCounter || 1;
+  normalizeGraphData();
 }
 
 function persistCurrentUserData() {
   if (!state.currentUser || !state.users[state.currentUser]) return;
+  normalizeGraphData();
   const user = state.users[state.currentUser];
   user.data = {
     spaces: state.spaces,
@@ -1061,15 +1067,31 @@ function renderMiniMap() {
   }
   const minX = Math.min(...nodes.map(n => n.x));
   const minY = Math.min(...nodes.map(n => n.y));
-  const maxX = Math.max(...nodes.map(n => n.x + 160));
-  const maxY = Math.max(...nodes.map(n => n.y + 80));
+  const maxX = Math.max(...nodes.map(n => n.x + NODE_FALLBACK_SIZE.width));
+  const maxY = Math.max(...nodes.map(n => n.y + NODE_FALLBACK_SIZE.height));
   const width = Math.max(1, maxX - minX);
   const height = Math.max(1, maxY - minY);
   const sx = 180 / width;
   const sy = 120 / height;
+  const edgeLayer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  edgeLayer.setAttribute('class', 'minimap-edges');
+  edgeLayer.setAttribute('viewBox', '0 0 180 120');
+  getSpaceEdges().forEach(edge => {
+    normalizeEdge(edge);
+    const fromNode = state.nodes[getEdgeSourceId(edge)];
+    const toNode = state.nodes[getEdgeTargetId(edge)];
+    if (!fromNode || !toNode) return;
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', (fromNode.x + NODE_FALLBACK_SIZE.width / 2 - minX) * sx);
+    line.setAttribute('y1', (fromNode.y + NODE_FALLBACK_SIZE.height / 2 - minY) * sy);
+    line.setAttribute('x2', (toNode.x + NODE_FALLBACK_SIZE.width / 2 - minX) * sx);
+    line.setAttribute('y2', (toNode.y + NODE_FALLBACK_SIZE.height / 2 - minY) * sy);
+    edgeLayer.appendChild(line);
+  });
+  world.appendChild(edgeLayer);
   nodes.forEach(node => {
     const dot = document.createElement('div');
-    dot.className = 'minimap-node';
+    dot.className = 'minimap-node' + (node.type === 'subtopic' ? ' subtopic' : '');
     dot.style.left = `${(node.x - minX) * sx}px`;
     dot.style.top = `${(node.y - minY) * sy}px`;
     world.appendChild(dot);
@@ -1254,9 +1276,9 @@ function createDemoData() {
   state.nodes['n_d2'] = { id: 'n_d2', spaceId, x: 350, y: 50, ...demo.nodes[1], colorIdx: 2, type: 'idea' };
   state.nodes['n_d3'] = { id: 'n_d3', spaceId, x: 350, y: 200, ...demo.nodes[2], colorIdx: 1, type: 'idea' };
   state.nodes['n_d4'] = { id: 'n_d4', spaceId, x: 600, y: 120, ...demo.nodes[3], colorIdx: 3, type: 'task' };
-  state.edges['e_d1'] = { id: 'e_d1', spaceId, from: 'n_d1', to: 'n_d2' };
-  state.edges['e_d2'] = { id: 'e_d2', spaceId, from: 'n_d1', to: 'n_d3' };
-  state.edges['e_d3'] = { id: 'e_d3', spaceId, from: 'n_d2', to: 'n_d4' };
+  state.edges['e_d1'] = createEdgeRecord('e_d1', spaceId, 'n_d1', 'n_d2');
+  state.edges['e_d2'] = createEdgeRecord('e_d2', spaceId, 'n_d1', 'n_d3');
+  state.edges['e_d3'] = createEdgeRecord('e_d3', spaceId, 'n_d2', 'n_d4');
   state.nodeIdCounter = 100;
   state.edgeIdCounter = 100;
   state.spaceIdCounter = 10;
@@ -1647,7 +1669,7 @@ function createTemplateContent(spaceId, templateId) {
     const to = idMap[toIdx];
     if (!from || !to) return;
     const id = 'e_' + (++state.edgeIdCounter);
-    state.edges[id] = { id, spaceId, from, to };
+    state.edges[id] = createEdgeRecord(id, spaceId, from, to);
   });
 }
 
@@ -1690,7 +1712,105 @@ function getSpaceNodes() {
   return Object.values(state.nodes).filter(n => n.spaceId === state.currentSpaceId);
 }
 function getSpaceEdges() {
-  return Object.values(state.edges).filter(e => e.spaceId === state.currentSpaceId);
+  return Object.values(state.edges).filter(e => e.spaceId === state.currentSpaceId).map(normalizeEdge);
+}
+
+const DEFAULT_NODE_ANCHORS = ['top', 'right', 'bottom', 'left'];
+const SUBTOPIC_NODE_ANCHORS = ['top'];
+const DEFAULT_EDGE_SOURCE_ANCHOR = 'right';
+const DEFAULT_EDGE_TARGET_ANCHOR = 'left';
+const NODE_FALLBACK_SIZE = { width: 190, height: 104 };
+
+function getNodeAnchors(node) {
+  return node?.type === 'subtopic' ? SUBTOPIC_NODE_ANCHORS : DEFAULT_NODE_ANCHORS;
+}
+
+function getEdgeSourceId(edge) {
+  return edge?.sourceId || edge?.from || edge?.source;
+}
+
+function getEdgeTargetId(edge) {
+  return edge?.targetId || edge?.to || edge?.target;
+}
+
+function normalizeEdge(edge) {
+  if (!edge) return edge;
+  const sourceId = getEdgeSourceId(edge);
+  const targetId = getEdgeTargetId(edge);
+  edge.from = sourceId;
+  edge.to = targetId;
+  edge.sourceId = sourceId;
+  edge.targetId = targetId;
+  edge.sourceAnchor = edge.sourceAnchor || DEFAULT_EDGE_SOURCE_ANCHOR;
+  edge.targetAnchor = edge.targetAnchor || DEFAULT_EDGE_TARGET_ANCHOR;
+  return edge;
+}
+
+function normalizeGraphData() {
+  Object.values(state.edges || {}).forEach(normalizeEdge);
+}
+
+function createEdgeRecord(id, spaceId, sourceId, targetId, sourceAnchor = DEFAULT_EDGE_SOURCE_ANCHOR, targetAnchor = DEFAULT_EDGE_TARGET_ANCHOR) {
+  return normalizeEdge({
+    id,
+    spaceId,
+    from: sourceId,
+    to: targetId,
+    sourceId,
+    targetId,
+    sourceAnchor,
+    targetAnchor
+  });
+}
+
+function getNodeSize(nodeId) {
+  const el = document.getElementById('node-' + nodeId);
+  if (!el) return NODE_FALLBACK_SIZE;
+  return {
+    width: el.offsetWidth || NODE_FALLBACK_SIZE.width,
+    height: el.offsetHeight || NODE_FALLBACK_SIZE.height
+  };
+}
+
+function getAnchorPoint(nodeId, anchor = DEFAULT_EDGE_SOURCE_ANCHOR) {
+  const node = state.nodes[nodeId];
+  if (!node) return null;
+  const size = getNodeSize(nodeId);
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const points = {
+    top: { x: x + size.width / 2, y },
+    right: { x: x + size.width, y: y + size.height / 2 },
+    bottom: { x: x + size.width / 2, y: y + size.height },
+    left: { x, y: y + size.height / 2 }
+  };
+  return points[anchor] || points[DEFAULT_EDGE_SOURCE_ANCHOR];
+}
+
+function anchorDirection(anchor) {
+  return {
+    top: { x: 0, y: -1 },
+    right: { x: 1, y: 0 },
+    bottom: { x: 0, y: 1 },
+    left: { x: -1, y: 0 }
+  }[anchor] || { x: 1, y: 0 };
+}
+
+function createEdgePathData(start, end, sourceAnchor = DEFAULT_EDGE_SOURCE_ANCHOR, targetAnchor = DEFAULT_EDGE_TARGET_ANCHOR) {
+  const sd = anchorDirection(sourceAnchor);
+  const td = anchorDirection(targetAnchor);
+  const distance = Math.hypot(end.x - start.x, end.y - start.y);
+  const handle = Math.max(48, Math.min(180, distance * 0.42));
+  const c1 = { x: start.x + sd.x * handle, y: start.y + sd.y * handle };
+  const c2 = { x: end.x + td.x * handle, y: end.y + td.y * handle };
+  return `M ${start.x} ${start.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${end.x} ${end.y}`;
+}
+
+function viewportPointFromWorld(point) {
+  return {
+    x: point.x * state.view.scale + state.view.x,
+    y: point.y * state.view.scale + state.view.y
+  };
 }
 
 function renderCanvas() {
@@ -1779,17 +1899,20 @@ function renderStructuredView() {
 function createNodeEl(node) {
   const colorSet = NODE_COLORS[node.colorIdx || 0];
   const type = NODE_TYPES[node.type || 'idea'] || NODE_TYPES.idea;
+  const anchorsHtml = getNodeAnchors(node).map(anchor => (
+    `<button class="node-anchor node-anchor-${anchor}" data-anchor="${anchor}" data-node-id="${escAttr(node.id)}" title="${anchor}"></button>`
+  )).join('');
   const div = document.createElement('div');
-  div.className = 'node';
+  div.className = 'node' + (node.type === 'subtopic' ? ' subtopic-node' : '');
   div.id = 'node-' + node.id;
   div.style.left = node.x + 'px';
   div.style.top = node.y + 'px';
-  div.style.background = colorSet.bg;
+  div.style.background = `linear-gradient(180deg, ${colorSet.bg}f2, rgba(5, 12, 24, 0.98))`;
   div.style.borderColor = colorSet.dot;
   if (getSelectedNodeIds().includes(node.id)) div.classList.add('selected');
   const tagsHtml = node.tags ? node.tags.split(',').map(t => `<span class="node-tag">${escHtml(t.trim())}</span>`).join('') : '';
   div.innerHTML = `
-    <div class="node-in-handle" data-node="${node.id}"></div>
+    <div class="node-anchor-layer">${anchorsHtml}</div>
     <div class="node-header">
       <div class="node-dot" style="background:${colorSet.dot};box-shadow:0 0 8px ${colorSet.dot}"></div>
       <div class="node-title">${escHtml(node.title)}</div>
@@ -1800,14 +1923,23 @@ function createNodeEl(node) {
     <div class="node-actions">
       <button class="node-action-btn" onclick="editNode(event,'${node.id}')">${tr('edit')}</button>
       <button class="node-action-btn" onclick="addSubnode(event,'${node.id}')">${tr('subnode')}</button>
-      <button class="node-action-btn" onclick="startConnect('${node.id}',event)">${tr('addLink')}</button>
+      <button class="node-action-btn" onclick="startConnect('${node.id}','right',event)">${tr('addLink')}</button>
       <button class="node-action-btn danger" onclick="deleteNode(event,'${node.id}')">${tr('del')}</button>
     </div>
-    <div class="node-connect-handle" data-node="${node.id}"></div>
   `;
   div.addEventListener('mousedown', (e) => onNodeMouseDown(e, node.id));
-  const handle = div.querySelector('.node-connect-handle');
-  if (handle) handle.addEventListener('mousedown', (e) => { e.stopPropagation(); startConnect(node.id, e); });
+  div.querySelectorAll('.node-anchor').forEach(anchorEl => {
+    anchorEl.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      startConnect(node.id, anchorEl.dataset.anchor, e);
+    });
+    anchorEl.addEventListener('mouseup', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      finishConnect(node.id, anchorEl.dataset.anchor);
+    });
+  });
   return div;
 }
 
@@ -1818,23 +1950,25 @@ function renderEdges() {
   const edges = getSpaceEdges();
   const visibleIds = getFocusedNodeIds();
   edges.forEach(edge => {
-    if (visibleIds && (!visibleIds.has(edge.from) || !visibleIds.has(edge.to))) return;
-    const fromNode = state.nodes[edge.from];
-    const toNode = state.nodes[edge.to];
+    normalizeEdge(edge);
+    const sourceId = getEdgeSourceId(edge);
+    const targetId = getEdgeTargetId(edge);
+    if (visibleIds && (!visibleIds.has(sourceId) || !visibleIds.has(targetId))) return;
+    const fromNode = state.nodes[sourceId];
+    const toNode = state.nodes[targetId];
     if (!fromNode || !toNode) return;
-    const x1 = fromNode.x + 140;
-    const y1 = fromNode.y + 30;
-    const x2 = toNode.x;
-    const y2 = toNode.y + 30;
-    const cx = (x1 + x2) / 2;
+    const start = getAnchorPoint(sourceId, edge.sourceAnchor || DEFAULT_EDGE_SOURCE_ANCHOR);
+    const end = getAnchorPoint(targetId, edge.targetAnchor || DEFAULT_EDGE_TARGET_ANCHOR);
+    if (!start || !end) return;
+    const d = createEdgePathData(start, end, edge.sourceAnchor, edge.targetAnchor);
     
     const bgPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    bgPath.setAttribute('d', `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`);
+    bgPath.setAttribute('d', d);
     bgPath.setAttribute('class', 'edge-path-bg');
     svg.appendChild(bgPath);
     
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`);
+    path.setAttribute('d', d);
     path.setAttribute('class', 'edge-path');
     path.setAttribute('data-edge', edge.id);
     path.addEventListener('click', () => {
@@ -1853,12 +1987,11 @@ function renderEdges() {
 // ===== DRAG & PAN =====
 function onNodeMouseDown(e, nodeId) {
   if (e.target.tagName === 'BUTTON') return;
-  if (e.target.classList.contains('node-connect-handle')) return;
+  if (e.target.classList.contains('node-anchor')) return;
   e.stopPropagation();
   if (state.tool === 'cut') return;
   if (state.tool === 'connect') {
-    if (state.connectSource && state.connectSource !== nodeId) { finishConnect(nodeId); }
-    else { startConnect(nodeId, e); }
+    if (state.connectSource) cancelConnect();
     return;
   }
   if (!getSelectedNodeIds().includes(nodeId)) selectNode(nodeId, e.shiftKey || e.ctrlKey || e.metaKey);
@@ -2039,6 +2172,25 @@ function quickCapture() {
   if (captured) showToast(`${tr('capture')}: ${captured}`);
 }
 
+function findSubtopicPosition(parent) {
+  const existing = getSpaceNodes();
+  const startX = parent.x;
+  const startY = parent.y + NODE_FALLBACK_SIZE.height + 74;
+  const offsets = [0, 220, -220, 440, -440, 110, -110, 330, -330];
+  for (const offset of offsets) {
+    const candidate = { x: startX + offset, y: startY + Math.abs(offset / 220) * 34 };
+    const overlaps = existing.some(node => (
+      node.id !== parent.id &&
+      candidate.x < node.x + NODE_FALLBACK_SIZE.width + 24 &&
+      candidate.x + NODE_FALLBACK_SIZE.width + 24 > node.x &&
+      candidate.y < node.y + NODE_FALLBACK_SIZE.height + 24 &&
+      candidate.y + NODE_FALLBACK_SIZE.height + 24 > node.y
+    ));
+    if (!overlaps) return candidate;
+  }
+  return { x: startX + 140, y: startY + 80 };
+}
+
 function addSubnode(e, parentId) {
   e.stopPropagation();
   const parent = state.nodes[parentId];
@@ -2047,10 +2199,11 @@ function addSubnode(e, parentId) {
     showPlanLimit('links');
     return;
   }
-  const id = createNode(parent.x + 200, parent.y, tr('subnode').replace('+', ''), '');
+  const pos = findSubtopicPosition(parent);
+  const id = createNode(pos.x, pos.y, tr('subnode').replace('+', ''), '', parent.colorIdx || 0, 'subtopic');
   if (!id) return;
   const eid = 'e_' + (++state.edgeIdCounter);
-  state.edges[eid] = { id: eid, spaceId: state.currentSpaceId, from: parentId, to: id };
+  state.edges[eid] = createEdgeRecord(eid, state.currentSpaceId, parentId, id, 'bottom', 'top');
   saveState();
   renderCanvas();
   showToast(`✓ ${tr('links')}`);
@@ -2135,8 +2288,8 @@ function deleteSelected() {
 
 function edgeExists(fromId, toId) {
   return Object.values(state.edges).some(e =>
-    (e.from === fromId && e.to === toId) ||
-    (e.from === toId && e.to === fromId)
+    (getEdgeSourceId(e) === fromId && getEdgeTargetId(e) === toId) ||
+    (getEdgeSourceId(e) === toId && getEdgeTargetId(e) === fromId)
   );
 }
 
@@ -2147,18 +2300,25 @@ function createEdgeDirect(fromId, toId, options = {}) {
     return false;
   }
   const eid = 'e_' + (++state.edgeIdCounter);
-  state.edges[eid] = { id: eid, spaceId: state.currentSpaceId, from: fromId, to: toId };
+  state.edges[eid] = createEdgeRecord(
+    eid,
+    state.currentSpaceId,
+    fromId,
+    toId,
+    options.sourceAnchor || DEFAULT_EDGE_SOURCE_ANCHOR,
+    options.targetAnchor || DEFAULT_EDGE_TARGET_ANCHOR
+  );
   return true;
 }
 
-function createConnection(fromId, toId) {
+function createConnection(fromId, toId, sourceAnchor = DEFAULT_EDGE_SOURCE_ANCHOR, targetAnchor = DEFAULT_EDGE_TARGET_ANCHOR) {
   if (!fromId || !toId || fromId === toId || edgeExists(fromId, toId)) return false;
   if (!canUsePlanResource('links', getHubMetrics().totalEdges + 1)) {
     showPlanLimit('links');
     return false;
   }
   captureHistory(tr('connect'));
-  createEdgeDirect(fromId, toId);
+  createEdgeDirect(fromId, toId, { sourceAnchor, targetAnchor });
   saveState();
   renderEdges();
   updateStats();
@@ -2200,19 +2360,24 @@ function selectNode(id, additive = false) {
 }
 
 // ===== CONNECT =====
-function startConnect(nodeId, e) {
+function startConnect(nodeId, anchor = DEFAULT_EDGE_SOURCE_ANCHOR, e) {
   if (e?.stopPropagation) e.stopPropagation();
-  state.connectSource = nodeId;
+  const node = state.nodes[nodeId];
+  if (!node || !getNodeAnchors(node).includes(anchor)) return;
+  state.connectSource = { nodeId, anchor };
   setTool('connect');
   const indicator = document.getElementById('connect-indicator');
   if (indicator) indicator.classList.add('active');
   showToast(tr('connectionMode'));
 }
 
-function finishConnect(toId) {
-  if (!state.connectSource || state.connectSource === toId) { cancelConnect(); return; }
-  if (edgeExists(state.connectSource, toId)) { showToast(`⚠ ${tr('linkButton')} exists`); cancelConnect(); return; }
-  createConnection(state.connectSource, toId);
+function finishConnect(toId, targetAnchor = DEFAULT_EDGE_TARGET_ANCHOR) {
+  const source = state.connectSource;
+  if (!source || !source.nodeId || source.nodeId === toId) { cancelConnect(); return; }
+  const targetNode = state.nodes[toId];
+  if (!targetNode || !getNodeAnchors(targetNode).includes(targetAnchor)) { cancelConnect(); return; }
+  if (edgeExists(source.nodeId, toId)) { showToast(`⚠ ${tr('linkButton')} exists`); cancelConnect(); return; }
+  createConnection(source.nodeId, toId, source.anchor, targetAnchor);
   cancelConnect();
   showToast(`✓ ${tr('links')}`);
 }
@@ -2227,19 +2392,19 @@ function cancelConnect() {
 
 function updateTempEdge(e) {
   if (!state.connectSource) return;
-  const fromNode = state.nodes[state.connectSource];
+  const source = state.connectSource;
+  const fromNode = state.nodes[source.nodeId];
   if (!fromNode) return;
   const wrap = document.getElementById('canvas-wrap');
   if (!wrap) return;
   const rect = wrap.getBoundingClientRect();
-  const x1 = fromNode.x * state.view.scale + state.view.x + 140 * state.view.scale;
-  const y1 = fromNode.y * state.view.scale + state.view.y + 30 * state.view.scale;
-  const x2 = e.clientX - rect.left;
-  const y2 = e.clientY - rect.top;
-  const cx = (x1 + x2) / 2;
+  const startWorld = getAnchorPoint(source.nodeId, source.anchor);
+  if (!startWorld) return;
+  const start = viewportPointFromWorld(startWorld);
+  const end = { x: e.clientX - rect.left, y: e.clientY - rect.top };
   const path = document.getElementById('temp-edge-path');
   if (path) {
-    path.setAttribute('d', `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`);
+    path.setAttribute('d', createEdgePathData(start, end, source.anchor, DEFAULT_EDGE_TARGET_ANCHOR));
     path.style.display = '';
   }
 }
@@ -2320,21 +2485,28 @@ function finishSelectionBox() {
 }
 
 function getEdgeSamplePoints(edge) {
-  const fromNode = state.nodes[edge.from];
-  const toNode = state.nodes[edge.to];
+  normalizeEdge(edge);
+  const sourceId = getEdgeSourceId(edge);
+  const targetId = getEdgeTargetId(edge);
+  const fromNode = state.nodes[sourceId];
+  const toNode = state.nodes[targetId];
   if (!fromNode || !toNode) return [];
-  const x1 = fromNode.x + 140;
-  const y1 = fromNode.y + 30;
-  const x2 = toNode.x;
-  const y2 = toNode.y + 30;
-  const cx = (x1 + x2) / 2;
+  const start = getAnchorPoint(sourceId, edge.sourceAnchor || DEFAULT_EDGE_SOURCE_ANCHOR);
+  const end = getAnchorPoint(targetId, edge.targetAnchor || DEFAULT_EDGE_TARGET_ANCHOR);
+  if (!start || !end) return [];
+  const sd = anchorDirection(edge.sourceAnchor || DEFAULT_EDGE_SOURCE_ANCHOR);
+  const td = anchorDirection(edge.targetAnchor || DEFAULT_EDGE_TARGET_ANCHOR);
+  const distance = Math.hypot(end.x - start.x, end.y - start.y);
+  const handle = Math.max(48, Math.min(180, distance * 0.42));
+  const c1 = { x: start.x + sd.x * handle, y: start.y + sd.y * handle };
+  const c2 = { x: end.x + td.x * handle, y: end.y + td.y * handle };
   const points = [];
   for (let i = 0; i <= 18; i++) {
     const t = i / 18;
     const mt = 1 - t;
     points.push({
-      x: mt * mt * mt * x1 + 3 * mt * mt * t * cx + 3 * mt * t * t * cx + t * t * t * x2,
-      y: mt * mt * mt * y1 + 3 * mt * mt * t * y1 + 3 * mt * t * t * y2 + t * t * t * y2
+      x: mt * mt * mt * start.x + 3 * mt * mt * t * c1.x + 3 * mt * t * t * c2.x + t * t * t * end.x,
+      y: mt * mt * mt * start.y + 3 * mt * mt * t * c1.y + 3 * mt * t * t * c2.y + t * t * t * end.y
     });
   }
   return points;
@@ -2702,7 +2874,7 @@ async function smartConnect() {
           return;
         }
         const eid = 'e_' + (++state.edgeIdCounter);
-        state.edges[eid] = { id: eid, spaceId: state.currentSpaceId, from: a.id, to: b.id };
+        state.edges[eid] = createEdgeRecord(eid, state.currentSpaceId, a.id, b.id);
         existingEdges.add(key1);
         existingEdges.add(key2);
         newEdges++;
@@ -2750,7 +2922,18 @@ function exportSpaceJSON() {
   const data = {
     space: space,
     nodes: getSpaceNodes(),
-    edges: getSpaceEdges().map(e => ({ id: e.id, from: e.from, to: e.to })),
+    edges: getSpaceEdges().map(e => {
+      normalizeEdge(e);
+      return {
+        id: e.id,
+        from: getEdgeSourceId(e),
+        to: getEdgeTargetId(e),
+        sourceId: getEdgeSourceId(e),
+        targetId: getEdgeTargetId(e),
+        sourceAnchor: e.sourceAnchor || DEFAULT_EDGE_SOURCE_ANCHOR,
+        targetAnchor: e.targetAnchor || DEFAULT_EDGE_TARGET_ANCHOR
+      };
+    }),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -2786,7 +2969,14 @@ function importSpaceJSON() {
         if (data.edges) {
           data.edges.forEach(e => {
             const newId = 'e_' + (++state.edgeIdCounter);
-            state.edges[newId] = { id: newId, spaceId: newSpaceId, from: idMap[e.from] || e.from, to: idMap[e.to] || e.to };
+            state.edges[newId] = createEdgeRecord(
+              newId,
+              newSpaceId,
+              idMap[getEdgeSourceId(e)] || getEdgeSourceId(e),
+              idMap[getEdgeTargetId(e)] || getEdgeTargetId(e),
+              e.sourceAnchor || DEFAULT_EDGE_SOURCE_ANCHOR,
+              e.targetAnchor || DEFAULT_EDGE_TARGET_ANCHOR
+            );
           });
         }
         saveState();
@@ -3019,6 +3209,7 @@ function importAllData() {
           state.spaces = data.spaces || [];
           state.nodes = data.nodes || {};
           state.edges = data.edges || {};
+          normalizeGraphData();
           state.theme = data.theme || 'cyber';
           state.accentColor = data.accentColor || '#00f5ff';
           state.subscriptionPlan = data.subscriptionPlan || 'basic';
@@ -3703,19 +3894,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (state.connectSource) updateTempEdge(e);
   });
-  document.addEventListener('mouseup', () => {
+  document.addEventListener('mouseup', (e) => {
     if (state.selecting) finishSelectionBox();
     if (state.cutting) finishCutting();
+    if (state.connectSource && !e.target.closest('.node-anchor')) cancelConnect();
     state.panning = false;
   });
 
   document.addEventListener('click', (e) => {
     if (!state.connectSource) return;
-    const nodeEl = e.target.closest('.node');
-    if (nodeEl) {
-      const id = nodeEl.id.replace('node-', '');
-      finishConnect(id);
-    }
+    if (!e.target.closest('.node-anchor')) cancelConnect();
   });
 });
 
@@ -3835,6 +4023,7 @@ async function loadCurrentUserFromSupabase() {
     state.spaces = cloudSpaces;
     state.nodes = cloud.nodes || {};
     state.edges = cloud.edges || {};
+    normalizeGraphData();
 
     state.nodeIdCounter = getMaxCounterFromObject(state.nodes);
     state.edgeIdCounter = getMaxCounterFromObject(state.edges);
