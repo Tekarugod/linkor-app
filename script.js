@@ -1690,6 +1690,7 @@ function renderHub() {
     const card = document.createElement('div');
     card.className = 'space-card';
     card.dataset.tour = 'open-space';
+    card.dataset.spaceId = space.id;
     card.style.animationDelay = (spaces.indexOf(space) * 0.05) + 's';
     const initials = (space.name || 'NS').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
     card.innerHTML = `
@@ -1707,7 +1708,10 @@ function renderHub() {
       </div>
       <button class="space-card-del" onclick="deleteSpace(event,'${space.id}')">✕</button>
     `;
-    card.onclick = () => openSpace(space.id);
+    card.onclick = () => {
+      emitLinkorEvent('space-card-opened', { id: space.id, spaceId: space.id, name: space.name });
+      openSpace(space.id);
+    };
     grid.appendChild(card);
   });
   const newCard = document.createElement('div');
@@ -1923,6 +1927,10 @@ function openNewSpaceModal() {
     if (input) {
       input.focus();
       input.addEventListener('keydown', e => { if (e.key === 'Enter') createSpace(); });
+      input.addEventListener('input', () => {
+        updateOnboardingActionState();
+        if (input.value.trim()) emitLinkorEvent('space-name-entered', { name: input.value.trim() });
+      });
     }
   }, 100);
 }
@@ -1937,6 +1945,7 @@ function selectSpaceColor(c, el) {
   newSpaceColor = c;
   document.querySelectorAll('.modal-tone').forEach(el2 => el2.classList.remove('active'));
   el.classList.add('active');
+  emitLinkorEvent('space-color-selected', { color: c });
 }
 
 function selectSpaceTemplate(templateId, el) {
@@ -1944,6 +1953,10 @@ function selectSpaceTemplate(templateId, el) {
   newSpaceTemplate = templateId;
   document.querySelectorAll('.template-card').forEach(card => card.classList.remove('active'));
   el.classList.add('active');
+  emitLinkorEvent('space-template-selected', { templateId });
+  if (isOnboardingActive() && templateId !== 'blank') {
+    showToast('Для туру найпростіше почати з порожнього простору.');
+  }
 }
 
 function createSpace() {
@@ -2310,12 +2323,29 @@ function createNodeEl(node) {
     anchorEl.addEventListener('mousedown', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (state.tool === 'connect' && state.connectSource && state.connectSource.nodeId !== node.id) {
+        finishConnect(node.id, anchorEl.dataset.anchor);
+        return;
+      }
       startConnect(node.id, anchorEl.dataset.anchor, e);
     });
     anchorEl.addEventListener('mouseup', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (isOnboardingActive() && state.connectSource?.nodeId === node.id && onboarding.waitingFor === 'connection-started') {
+        return;
+      }
       finishConnect(node.id, anchorEl.dataset.anchor);
+    });
+    anchorEl.addEventListener('click', (e) => {
+      if (!isOnboardingActive() || state.tool !== 'connect') return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (state.connectSource && state.connectSource.nodeId !== node.id) {
+        finishConnect(node.id, anchorEl.dataset.anchor);
+        return;
+      }
+      if (!state.connectSource) startConnect(node.id, anchorEl.dataset.anchor, e);
     });
   });
   return div;
@@ -2363,9 +2393,35 @@ function renderEdges() {
 }
 
 // ===== DRAG & PAN =====
+function handleOnboardingSimpleConnectNode(nodeId, e) {
+  if (!isOnboardingActive()) return false;
+  const step = ONBOARDING_STEPS[onboarding.stepIndex];
+  if (!step?.simpleConnectStep || !nodeId) return false;
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
+
+  if (onboarding.waitingFor === 'connection-started') {
+    onboarding.simpleConnectSourceId = nodeId;
+    selectNode(nodeId);
+    emitLinkorEvent('connection-started', { nodeId, mode: 'onboarding-simple' });
+    return true;
+  }
+
+  if (onboarding.waitingFor === 'edge-created') {
+    const sourceId = onboarding.simpleConnectSourceId || onboarding.firstNodeId;
+    if (!sourceId || sourceId === nodeId) return true;
+    selectNode(nodeId);
+    createConnection(sourceId, nodeId, 'right', 'left');
+    return true;
+  }
+
+  return false;
+}
+
 function onNodeMouseDown(e, nodeId) {
   if (e.target.tagName === 'BUTTON') return;
   if (e.target.classList.contains('node-anchor')) return;
+// Simple click-to-connect disabled: onboarding must teach real handle drag.
   e.stopPropagation();
   if (state.tool === 'cut') return;
   if (state.tool === 'connect') {
@@ -2413,6 +2469,7 @@ function applyView() {
   const zoomLabel = document.getElementById('zoom-label');
   if (zoomLabel) zoomLabel.textContent = Math.round(state.view.scale * 100) + '%';
   renderMiniMap();
+  if (onboarding.active) requestAnimationFrame(() => positionOnboardingCard(getOnboardingTarget(ONBOARDING_STEPS[onboarding.stepIndex])));
 }
 
 function zoom(factor, cx, cy) {
@@ -2463,6 +2520,7 @@ function setTool(tool) {
     wrap.style.cursor = tool === 'node' ? 'crosshair' : tool === 'cut' ? 'crosshair' : 'default';
     wrap.classList.toggle('cut-cursor', tool === 'cut');
   }
+  if (tool === 'node') emitLinkorEvent('create-node-mode-enabled');
 }
 
 function addNodeAt(e) {
@@ -2496,12 +2554,17 @@ function createNode(x, y, title, desc, colorIdx, type = 'idea', options = {}) {
     colorIdx: colorIdx || 0,
     type
   };
+  applyOnboardingNodePosition(state.nodes[id]);
   if (!options.skipSave) saveState();
   const world = document.getElementById('canvas-world');
   if (world) world.appendChild(createNodeEl(state.nodes[id]));
   updateStats();
   selectNode(id);
-  emitLinkorEvent('node-created', { id, nodeId: id, node: state.nodes[id], count: getSpaceNodes().length });
+  const nodeCount = getSpaceNodes().length;
+  const tourNodeIndex = isOnboardingActive() ? onboarding.createdNodeIds.length + 1 : nodeCount;
+  emitLinkorEvent('node-created', { id, nodeId: id, node: state.nodes[id], count: nodeCount });
+  if (tourNodeIndex === 1) emitLinkorEvent('first-node-created', { id, nodeId: id, node: state.nodes[id], count: nodeCount });
+  if (tourNodeIndex === 2) emitLinkorEvent('second-node-created', { id, nodeId: id, node: state.nodes[id], count: nodeCount });
   if (!options.silent) showToast(`✓ ${tr('addNode')}`);
   return id;
 }
@@ -2759,7 +2822,9 @@ function startConnect(nodeId, anchor = DEFAULT_EDGE_SOURCE_ANCHOR, e) {
   const node = state.nodes[nodeId];
   if (!node || !getNodeAnchors(node).includes(anchor)) return;
   state.connectSource = { nodeId, anchor };
+  if (isOnboardingActive()) onboarding.connectionSource = { nodeId, anchor };
   setTool('connect');
+  emitLinkorEvent('connection-started', { nodeId, anchor });
   const indicator = document.getElementById('connect-indicator');
   if (indicator) indicator.classList.add('active');
   showToast(tr('connectionMode'));
@@ -2852,6 +2917,21 @@ function cancelConnect() {
   if (indicator) indicator.classList.remove('active');
   const tp = document.getElementById('temp-edge-path');
   if (tp) tp.style.display = 'none';
+}
+
+function handleOnboardingConnectionMouseUp(e) {
+  if (!isOnboardingActive() || !onboarding.secondNodeId) return;
+  if (!['connection-started', 'edge-created'].includes(onboarding.waitingFor)) return;
+  if (!state.connectSource && onboarding.connectionSource) state.connectSource = { ...onboarding.connectionSource };
+  if (!state.connectSource) return;
+  const targetAnchor = document.querySelector(getOnboardingAnchorSelector(onboarding.secondNodeId, 'left'));
+  if (!targetAnchor) return;
+  const rect = targetAnchor.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  if (Math.hypot(e.clientX - cx, e.clientY - cy) <= 90) {
+    finishConnect(onboarding.secondNodeId, 'left');
+  }
 }
 
 function updateTempEdge(e) {
@@ -3147,6 +3227,11 @@ function connectSuggested(fromId, toId) {
 }
 
 // ===== NODE EDITOR =====
+function closeRightPanels(exceptId = null) {
+  ['ai-panel', 'node-editor'].forEach(id => {
+    if (id !== exceptId) document.getElementById(id)?.classList.remove('open');
+  });
+}
 function editNode(e, nodeId) {
   e.stopPropagation();
   selectNode(nodeId);
@@ -3174,6 +3259,7 @@ function editNode(e, nodeId) {
       ? connectedNodes.map(n => `<span class="connected-node-badge" onclick="selectNode('${n.id}')">${escHtml(n.title)}</span>`).join('')
       : `<span style="color:var(--text-dim)">${tr('noSuggestions')}</span>`;
   }
+  closeRightPanels('node-editor');
   document.getElementById('node-editor')?.classList.add('open');
 }
 
@@ -4075,6 +4161,7 @@ async function generateNodesFromPrompt(prompt) {
 }
 
 function openThinkingMode() {
+  closeRightPanels('ai-panel');
   const panel = document.getElementById('ai-panel');
   if (panel && !panel.classList.contains('open')) panel.classList.add('open');
   const input = document.getElementById('ai-prompt-input');
@@ -4150,6 +4237,10 @@ function renderAISummary() {
 function toggleAIPanel() {
   const panel = document.getElementById('ai-panel');
   if (!panel) return;
+
+  const willOpen = !panel.classList.contains('open');
+  if (willOpen) closeRightPanels('ai-panel');
+
   panel.classList.toggle('open');
   if (panel.classList.contains('open')) {
     generateAIResponse();
@@ -4302,27 +4393,63 @@ let onboarding = {
   stepIndex: 0,
   waitingFor: null,
   nodeCreateCount: 0,
+  createdNodeIds: [],
   lastNodeId: null,
+  firstNodeId: null,
+  secondNodeId: null,
+  lastEdgeId: null,
+  createdSpaceId: null,
+  pendingCanvasRect: null,
+  connectionSource: null,
+  simpleConnectSourceId: null,
   targetTimer: null,
-  targetStartedAt: 0
+  targetStartedAt: 0,
+  stepReady: false,
+  enteredStepIndex: -1,
+  debug: false
 };
 
 const ONBOARDING_STEPS = [
-  { target: '[data-tour="create-space"]', title: 'Створи простір', text: 'Натисни тут, щоб створити нове поле для ідей або проєкту.', waitFor: 'space-create-modal-opened' },
-  { target: '[data-tour="space-title"]', title: 'Назва простору', text: 'Введи назву простору. Наприклад: Мій перший проєкт.' },
-  { target: '[data-tour="templates"]', title: 'Шаблони', text: 'Обери шаблон для швидкого старту або залиш порожній простір.' },
-  { target: '[data-tour="space-color"]', title: 'Колір', text: 'Обери візуальний тон простору.' },
-  { target: '[data-tour="create-space-submit"]', title: 'Створити', text: 'Натисни, щоб створити простір і перейти до карти.', waitFor: 'space-created' },
-  { target: '[data-tour="tools-panel"]', title: 'Інструменти', text: 'Тут знаходяться інструменти для створення і редагування карти.' },
-  { target: '[data-tour="add-node"]', title: 'Перший блок', text: 'Натисни Add node, щоб створити перший блок.', waitFor: 'node-created' },
-  { target: () => onboarding.lastNodeId ? `#node-${onboarding.lastNodeId}` : '.node', title: 'Блок', text: 'Це блок для думки, задачі або ідеї. Його можна рухати та з’єднувати.' },
-  { target: '[data-tour="add-node"]', title: 'Другий блок', text: 'Створи ще один блок, щоб пов’язати ідеї.', waitFor: 'second-node-created' },
-  { target: '[data-tour="connect-tool"]', title: 'Зв’язок', text: 'Обери Connect і протягни лінію від одного блоку до іншого.', waitFor: 'edge-created' },
-  { target: null, title: 'Екскурсію завершено', text: 'Тепер можеш створювати власні карти в Linkor.', final: true }
+  { target: '.hub-new-btn[data-tour="create-space"]', title: 'Створимо простір', text: 'Створимо твій перший простір. Натисни кнопку створення простору.', continueText: '👉 Для продовження: натисни кнопку', waitFor: 'space-create-modal-opened' },
+  { target: '[data-tour="space-title"]', title: 'Назва простору', text: 'Введи назву простору. Наприклад: Навчання, Робота або Ідеї.', continueText: '👉 Для продовження: введи назву простору', waitFor: 'space-name-entered' },
+  { target: '[data-tour="templates"]', title: 'Шаблони', text: 'Тут можна обрати готовий шаблон. Шаблони допомагають швидше почати.', continueText: '👉 Для продовження: обери шаблон або натисни "Далі"' },
+  { target: '[data-tour="space-color"]', title: 'Колір', text: 'Тут можна вибрати колір простору, щоб швидше знаходити його в списку.', continueText: '👉 Для продовження: обери колір або натисни "Далі"' },
+  { target: '[data-tour="create-space-submit"]', title: 'Створити', text: 'Готово. Натисни "Створити", щоб додати простір.', continueText: '👉 Для продовження: натисни "Створити"', waitFor: 'space-created' },
+  { target: () => getOnboardingSpaceCardSelector(), title: 'Твій простір', text: 'Ось твій новий простір. Натисни на нього, щоб відкрити.', continueText: '👉 Для продовження: натисни на створений простір', waitFor: 'space-card-opened' },
+  { target: '[data-tour="graph-canvas"]', title: 'Робоче поле', text: 'Це робоче поле. Тут будуть твої блоки з ідеями, задачами або нотатками.', continueText: '👉 Для продовження: натисни "Далі"', onEnter: () => ensureOnboardingGraphMode() },
+  { target: '.engine-sidebar', title: 'Ліва панель', text: 'Зліва знаходяться інструменти. Тут можна додавати блоки, зв’язки та редагувати простір.', continueText: '👉 Для продовження: натисни "Далі"' },
+  { target: '[data-tour="add-node"]', title: 'Додати блок', text: 'Ця кнопка вмикає режим створення нового блоку.', continueText: '👉 Для продовження: натисни цю кнопку', waitFor: 'create-node-mode-enabled', onEnter: () => ensureOnboardingGraphMode() },
+  { target: () => getOnboardingCanvasTargetSelector(), title: 'Порожнє місце', text: 'Натисни на порожнє місце на полі — там з’явиться новий блок.', continueText: '👉 Для продовження: натисни на підсвічену область', waitFor: 'first-node-created' },
+  { target: () => onboarding.firstNodeId ? `#node-${onboarding.firstNodeId}` : '.node', title: 'Це блок', text: 'Це блок. У ньому можна зберігати думку, задачу або ідею.', continueText: '👉 Для продовження: натисни "Далі"' },
+  { target: '[data-tour="add-node"]', title: 'Другий блок', text: 'Додамо ще один блок, щоб показати зв’язок між ідеями.', continueText: '👉 Для продовження: натисни кнопку додавання блоку', waitFor: 'create-node-mode-enabled', onEnter: () => ensureOnboardingGraphMode() },
+  { target: () => getOnboardingCanvasTargetSelector(), title: 'Ще одне місце', text: 'Натисни на інше порожнє місце — там з’явиться другий блок.', continueText: '👉 Для продовження: натисни на підсвічену область', waitFor: 'second-node-created' },
+ { target: () => getOnboardingAnchorSelector(onboarding.firstNodeId, 'right'), title: 'Початок зв’язку', text: 'Затисни підсвічену точку на правому краї блоку і потягни лінію до другого блоку.', continueText: '👉 Для продовження: затисни точку і почни тягнути лінію', waitFor: 'connection-started', connectionStep: true },
+{ target: () => getOnboardingAnchorSelector(onboarding.secondNodeId, 'left'), title: 'Завершення зв’язку', text: 'Дотягни лінію до підсвіченої точки на другому блоці та відпусти.', continueText: '👉 Для продовження: відпусти лінію на цій точці', waitFor: 'edge-created', connectionStep: true },
+  { target: () => onboarding.lastEdgeId ? `.edge-path[data-edge="${onboarding.lastEdgeId}"]` : '.edge-path', title: 'Готово', text: 'Готово. Так працює зв’язок між блоками.', continueText: '👉 Для продовження: натисни "Завершити"', final: true }
 ];
 
 function isOnboardingActive() {
   return Boolean(onboarding.active);
+}
+
+function ensureOnboardingGraphMode() {
+  if (state.viewMode !== 'graph') {
+    state.viewMode = 'graph';
+    updateViewModeButtons();
+    renderCanvas();
+  }
+}
+
+function getOnboardingSpaceCardSelector() {
+  return onboarding.createdSpaceId
+    ? `.space-card[data-space-id="${onboarding.createdSpaceId}"]`
+    : '.space-card[data-tour="open-space"]';
+}
+
+function startOnboardingSimpleConnect() {
+  ensureOnboardingGraphMode();
+  setTool('select');
+  onboarding.simpleConnectSourceId = null;
 }
 
 function ensureOnboardingDom() {
@@ -4334,11 +4461,11 @@ function ensureOnboardingDom() {
     <div class="onboarding-spotlight" id="onboarding-spotlight"></div>
     <div class="onboarding-welcome" id="onboarding-welcome">
       <div class="onboarding-welcome-kicker">LINKOR TOUR</div>
-      <h2>Вітаємо в Linkor</h2>
-      <p>Linkor допомагає будувати карти ідей, планів і проєктів через блоки та зв’язки.</p>
+      <h2>Ласкаво просимо в Linkor</h2>
+      <p>Ласкаво просимо в Linkor. Тут ти створюєш простори, вузли та зв’язки між ідеями.</p>
       <div class="onboarding-version">Поточна версія: <span class="onboarding-version-value">${latestAppVersion ? `v${latestAppVersion}` : '...'}</span></div>
       <div class="onboarding-actions welcome-actions">
-        <button onclick="beginOnboardingTour()">Почати екскурсію</button>
+        <button onclick="beginOnboardingTour()">Почати</button>
         <button onclick="skipOnboardingTour()" class="ghost">Пропустити</button>
       </div>
     </div>
@@ -4367,6 +4494,111 @@ function getOnboardingSelector(step) {
   return typeof step?.target === 'function' ? step.target() : step?.target;
 }
 
+function getOnboardingAnchorSelector(nodeId, anchor) {
+  return nodeId ? `.node-anchor[data-node-id="${nodeId}"][data-anchor="${anchor}"]` : '.node-anchor';
+}
+
+function rectsOverlap(a, b, pad = 18) {
+  return a.left < b.right + pad &&
+    a.right > b.left - pad &&
+    a.top < b.bottom + pad &&
+    a.bottom > b.top - pad;
+}
+
+function findOnboardingFreeCanvasRect(wrapRect, markerWidth, markerHeight) {
+  const nodeRects = [...document.querySelectorAll('.node')]
+    .map(node => node.getBoundingClientRect())
+    .filter(rect => rect.width > 0 && rect.height > 0);
+  const candidates = [
+    [0.50, 0.50], [0.68, 0.58], [0.38, 0.62], [0.72, 0.36],
+    [0.42, 0.34], [0.58, 0.72], [0.28, 0.48], [0.78, 0.68],
+    [0.50, 0.28], [0.30, 0.74], [0.74, 0.24], [0.22, 0.26]
+  ];
+  for (const [rx, ry] of candidates) {
+    const left = wrapRect.left + wrapRect.width * rx - markerWidth / 2;
+    const top = wrapRect.top + wrapRect.height * ry - markerHeight / 2;
+    const rect = {
+      left: Math.max(wrapRect.left + 16, Math.min(wrapRect.right - markerWidth - 16, left)),
+      top: Math.max(wrapRect.top + 16, Math.min(wrapRect.bottom - markerHeight - 16, top))
+    };
+    rect.right = rect.left + markerWidth;
+    rect.bottom = rect.top + markerHeight;
+    if (!nodeRects.some(nodeRect => rectsOverlap(rect, nodeRect, 28))) return rect;
+  }
+  return {
+    left: Math.max(wrapRect.left + 16, wrapRect.right - markerWidth - 24),
+    top: Math.max(wrapRect.top + 16, wrapRect.bottom - markerHeight - 24),
+    right: wrapRect.right - 24,
+    bottom: wrapRect.bottom - 24
+  };
+}
+
+function getOnboardingCanvasTargetSelector() {
+  const wrap = document.getElementById('canvas-wrap');
+  let marker = document.getElementById('onboarding-canvas-target');
+  if (!marker) {
+    marker = document.createElement('div');
+    marker.id = 'onboarding-canvas-target';
+    marker.className = 'onboarding-canvas-target';
+    marker.addEventListener('mousedown', event => {
+      if (isOnboardingActive() && state.tool === 'node') {
+        event.preventDefault();
+        event.stopPropagation();
+        addNodeAt(event);
+      }
+    });
+    document.body.appendChild(marker);
+  }
+  if (!wrap) return '#onboarding-canvas-target';
+  const rect = wrap.getBoundingClientRect();
+  const width = Math.min(220, Math.max(150, rect.width * 0.18));
+  const height = Math.min(140, Math.max(96, rect.height * 0.18));
+  let freeRect = null;
+  if (onboarding.createdNodeIds.length >= 1 && onboarding.firstNodeId && state.nodes[onboarding.firstNodeId]) {
+    const first = state.nodes[onboarding.firstNodeId];
+    const desired = viewportPointFromWorld({
+      x: first.x + NODE_FALLBACK_SIZE.width / 2 + 280,
+      y: first.y + NODE_FALLBACK_SIZE.height / 2 + 120
+    });
+    const candidate = {
+      left: Math.max(rect.left + 16, Math.min(rect.right - width - 16, rect.left + desired.x - width / 2)),
+      top: Math.max(rect.top + 16, Math.min(rect.bottom - height - 16, rect.top + desired.y - height / 2))
+    };
+    candidate.right = candidate.left + width;
+    candidate.bottom = candidate.top + height;
+    if (![...document.querySelectorAll('.node')].some(node => rectsOverlap(candidate, node.getBoundingClientRect(), 30))) {
+      freeRect = candidate;
+    }
+  }
+  if (!freeRect) freeRect = findOnboardingFreeCanvasRect(rect, width, height);
+  marker.style.left = `${freeRect.left}px`;
+  marker.style.top = `${freeRect.top}px`;
+  marker.style.width = `${width}px`;
+  marker.style.height = `${height}px`;
+  onboarding.pendingCanvasRect = { left: freeRect.left, top: freeRect.top, width, height };
+  return '#onboarding-canvas-target';
+}
+
+function applyOnboardingNodePosition(node) {
+  if (!isOnboardingActive() || !node || !onboarding.pendingCanvasRect) return;
+  if (!['first-node-created', 'second-node-created'].includes(onboarding.waitingFor)) return;
+  const wrap = document.getElementById('canvas-wrap');
+  if (!wrap) return;
+  const wrapRect = wrap.getBoundingClientRect();
+  const centerX = onboarding.pendingCanvasRect.left + onboarding.pendingCanvasRect.width / 2 - wrapRect.left;
+  const centerY = onboarding.pendingCanvasRect.top + onboarding.pendingCanvasRect.height / 2 - wrapRect.top;
+  const world = worldPointFromViewport({ x: centerX, y: centerY });
+  node.x = state.snapToGrid ? snapValue(world.x - NODE_FALLBACK_SIZE.width / 2) : world.x - NODE_FALLBACK_SIZE.width / 2;
+  node.y = state.snapToGrid ? snapValue(world.y - NODE_FALLBACK_SIZE.height / 2) : world.y - NODE_FALLBACK_SIZE.height / 2;
+  if (onboarding.waitingFor === 'second-node-created' && onboarding.firstNodeId && state.nodes[onboarding.firstNodeId]) {
+    const first = state.nodes[onboarding.firstNodeId];
+    if (Math.abs(node.x - first.x) < NODE_FALLBACK_SIZE.width + 48 && Math.abs(node.y - first.y) < NODE_FALLBACK_SIZE.height + 48) {
+      node.x = first.x + 280;
+      node.y = first.y + 120;
+    }
+  }
+}
+
 function waitForTarget(selector, timeoutMs = 5000) {
   const started = Date.now();
   return new Promise(resolve => {
@@ -4384,6 +4616,61 @@ function waitForTarget(selector, timeoutMs = 5000) {
 
 function clearOnboardingTarget() {
   document.querySelectorAll('.onboarding-active-target').forEach(el => el.classList.remove('onboarding-active-target'));
+}
+
+function getOnboardingProxy() {
+  let proxy = document.getElementById('onboarding-action-proxy');
+  if (!proxy) {
+    proxy = document.createElement('button');
+    proxy.id = 'onboarding-action-proxy';
+    proxy.className = 'onboarding-action-proxy';
+    proxy.type = 'button';
+    proxy.addEventListener('mousedown', event => {
+      if (!isOnboardingActive()) return;
+      if (onboarding.waitingFor === 'connection-started' && onboarding.firstNodeId) {
+        event.preventDefault();
+        event.stopPropagation();
+        startConnect(onboarding.firstNodeId, 'right', event);
+      }
+    });
+    proxy.addEventListener('mouseup', event => {
+      if (!isOnboardingActive()) return;
+      if (onboarding.waitingFor === 'edge-created' && onboarding.secondNodeId) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!state.connectSource && onboarding.connectionSource) state.connectSource = { ...onboarding.connectionSource };
+        finishConnect(onboarding.secondNodeId, 'left');
+      }
+    });
+    proxy.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!isOnboardingActive()) return;
+      if (onboarding.waitingFor === 'connection-started' && onboarding.firstNodeId) {
+        startConnect(onboarding.firstNodeId, 'right', event);
+      } else if (onboarding.waitingFor === 'edge-created' && onboarding.secondNodeId) {
+        if (!state.connectSource && onboarding.connectionSource) state.connectSource = { ...onboarding.connectionSource };
+        finishConnect(onboarding.secondNodeId, 'left');
+      }
+    });
+    document.body.appendChild(proxy);
+  }
+  return proxy;
+}
+
+function updateOnboardingProxy(target, step) {
+  const proxy = getOnboardingProxy();
+  if (!target || !step?.connectionStep || !['connection-started', 'edge-created'].includes(step?.waitFor)) {
+    proxy.style.display = 'none';
+    return;
+  }
+  const rect = target.getBoundingClientRect();
+  const size = Math.max(72, Math.max(rect.width, rect.height) + 34);
+  proxy.style.display = '';
+  proxy.style.left = `${rect.left + rect.width / 2 - size / 2}px`;
+  proxy.style.top = `${rect.top + rect.height / 2 - size / 2}px`;
+  proxy.style.width = `${size}px`;
+  proxy.style.height = `${size}px`;
 }
 
 function positionOnboardingCard(target) {
@@ -4406,23 +4693,48 @@ function positionOnboardingCard(target) {
   spotlight.style.top = `${rect.top - pad}px`;
   spotlight.style.width = `${rect.width + pad * 2}px`;
   spotlight.style.height = `${rect.height + pad * 2}px`;
-  const cardWidth = 340;
-  const cardHeight = 210;
+  const cardWidth = Math.min(340, window.innerWidth - 36);
+  const cardHeight = Math.min(card.offsetHeight || 210, window.innerHeight - 36);
   const gap = 18;
   const candidates = [
-    { left: rect.right + gap, top: rect.top + rect.height / 2 - cardHeight / 2 },
-    { left: rect.left - cardWidth - gap, top: rect.top + rect.height / 2 - cardHeight / 2 },
-    { left: rect.left + rect.width / 2 - cardWidth / 2, top: rect.bottom + gap },
-    { left: rect.left + rect.width / 2 - cardWidth / 2, top: rect.top - cardHeight - gap }
+    { side: 'right', left: rect.right + gap, top: rect.top + rect.height / 2 - cardHeight / 2 },
+    { side: 'left', left: rect.left - cardWidth - gap, top: rect.top + rect.height / 2 - cardHeight / 2 },
+    { side: 'bottom', left: rect.left + rect.width / 2 - cardWidth / 2, top: rect.bottom + gap },
+    { side: 'top', left: rect.left + rect.width / 2 - cardWidth / 2, top: rect.top - cardHeight - gap }
   ];
-  const fits = candidate =>
-    candidate.left >= 18 &&
-    candidate.top >= 18 &&
-    candidate.left + cardWidth <= window.innerWidth - 18 &&
-    candidate.top + cardHeight <= window.innerHeight - 18;
-  const chosen = candidates.find(fits) || candidates[2];
-  const left = Math.max(18, Math.min(window.innerWidth - cardWidth - 18, chosen.left));
-  const top = Math.max(18, Math.min(window.innerHeight - cardHeight - 18, chosen.top));
+  const preferred = [];
+  if (rect.left > window.innerWidth * 0.55) preferred.push('left');
+  if (rect.right < window.innerWidth * 0.45) preferred.push('right');
+  if (rect.top > window.innerHeight * 0.58) preferred.push('top');
+  if (rect.bottom < window.innerHeight * 0.42) preferred.push('bottom');
+  const ordered = [
+    ...preferred.map(side => candidates.find(candidate => candidate.side === side)).filter(Boolean),
+    ...candidates.filter(candidate => !preferred.includes(candidate.side))
+  ];
+  const spotlightRect = {
+    left: rect.left - pad,
+    top: rect.top - pad,
+    right: rect.right + pad,
+    bottom: rect.bottom + pad
+  };
+  const placed = ordered.map(candidate => {
+    const left = Math.max(18, Math.min(window.innerWidth - cardWidth - 18, candidate.left));
+    const top = Math.max(18, Math.min(window.innerHeight - cardHeight - 18, candidate.top));
+    const cardRect = { left, top, right: left + cardWidth, bottom: top + cardHeight };
+    const overlapX = Math.max(0, Math.min(cardRect.right, spotlightRect.right) - Math.max(cardRect.left, spotlightRect.left));
+    const overlapY = Math.max(0, Math.min(cardRect.bottom, spotlightRect.bottom) - Math.max(cardRect.top, spotlightRect.top));
+    return {
+      ...candidate,
+      left,
+      top,
+      overlap: overlapX * overlapY,
+      offscreen: candidate.left !== left || candidate.top !== top
+    };
+  });
+  const chosen = placed
+    .sort((a, b) => a.overlap - b.overlap || Number(a.offscreen) - Number(b.offscreen))[0] || placed[0];
+  const left = chosen.left;
+  const top = chosen.top;
   card.style.left = `${left}px`;
   card.style.top = `${top}px`;
   card.style.transform = 'none';
@@ -4438,15 +4750,18 @@ function renderOnboardingWelcome() {
   const welcome = document.getElementById('onboarding-welcome');
   welcome.innerHTML = `
     <div class="onboarding-welcome-kicker">LINKOR TOUR</div>
-    <h2>Вітаємо в Linkor</h2>
-    <p>Linkor допомагає будувати карти ідей, планів і проєктів через блоки та зв’язки.</p>
+    <h2>Ласкаво просимо в Linkor</h2>
+    <p>Ласкаво просимо в Linkor. Тут ти створюєш простори, вузли та зв’язки між ідеями.</p>
     <div class="onboarding-version">Поточна версія: <span class="onboarding-version-value">${latestAppVersion ? `v${latestAppVersion}` : '...'}</span></div>
     <div class="onboarding-actions welcome-actions">
-      <button onclick="beginOnboardingTour()">Почати екскурсію</button>
+      <button onclick="beginOnboardingTour()">Почати</button>
       <button onclick="skipOnboardingTour()" class="ghost">Пропустити</button>
     </div>
   `;
   welcome.style.display = 'block';
+  welcome.style.left = '50%';
+welcome.style.top = '50%';
+welcome.style.transform = 'translate(-50%, -50%)';
   loadAppVersion();
   renderOutdatedBanner();
 }
@@ -4455,9 +4770,11 @@ function renderOnboardingStep() {
   if (!onboarding.active) return;
   ensureOnboardingDom();
   const step = ONBOARDING_STEPS[onboarding.stepIndex] || ONBOARDING_STEPS[0];
-  if (step.final) {
-    renderOnboardingFinal(step);
-    return;
+  document.body.classList.toggle('onboarding-connection-mode', Boolean(step.connectionStep));
+  document.body.classList.toggle('onboarding-simple-connect-mode', Boolean(step.simpleConnectStep));
+  if (step.onEnter && onboarding.enteredStepIndex !== onboarding.stepIndex) {
+    onboarding.enteredStepIndex = onboarding.stepIndex;
+    step.onEnter();
   }
   const target = getOnboardingTarget(step);
   if (step.target && !target) {
@@ -4465,29 +4782,57 @@ function renderOnboardingStep() {
     return;
   }
   const overlay = document.getElementById('onboarding-overlay');
+  const card = document.getElementById('onboarding-card');
   overlay?.classList.add('active', 'tour-mode');
   overlay?.classList.remove('welcome-mode');
   document.getElementById('onboarding-welcome').style.display = 'none';
-  document.getElementById('onboarding-card').style.display = 'block';
+  card.style.display = 'block';
+  card.classList.remove('visible');
   document.getElementById('onboarding-progress').textContent = `Крок ${onboarding.stepIndex + 1} з ${ONBOARDING_STEPS.length}`;
   document.getElementById('onboarding-title').textContent = step.title || '';
   document.getElementById('onboarding-text').textContent = step.text;
   document.getElementById('onboarding-back').disabled = onboarding.stepIndex === 0;
   const next = document.getElementById('onboarding-next');
   const wait = document.getElementById('onboarding-wait');
-  next.textContent = step.waitFor ? 'Очікую дію' : 'Далі';
+  next.textContent = step.final ? 'Завершити' : (step.waitFor ? 'Далі' : 'Далі');
   next.disabled = Boolean(step.waitFor);
-  wait.textContent = step.waitFor ? 'Натисни підсвічений елемент і виконай дію, щоб продовжити.' : '';
+  wait.textContent = step.continueText || (step.waitFor ? '👉 Для продовження: виконай дію' : '👉 Для продовження: натисни "Далі"');
   onboarding.waitingFor = step.waitFor || null;
+  updateOnboardingActionState();
   positionOnboardingCard(target);
-  requestAnimationFrame(() => positionOnboardingCard(getOnboardingTarget(step)));
-  setTimeout(() => positionOnboardingCard(getOnboardingTarget(step)), 50);
+  updateOnboardingProxy(target, step);
+  requestAnimationFrame(() => {
+    positionOnboardingCard(getOnboardingTarget(step));
+    card.classList.add('visible');
+  });
+  requestAnimationFrame(() => updateOnboardingProxy(getOnboardingTarget(step), step));
+  setTimeout(() => {
+    const freshTarget = getOnboardingTarget(step);
+    positionOnboardingCard(freshTarget);
+    updateOnboardingProxy(freshTarget, step);
+  }, 50);
   localStorage.setItem(ONBOARDING_STEP_KEY, String(onboarding.stepIndex));
   renderOutdatedBanner();
 }
 
+function updateOnboardingActionState() {
+  if (!onboarding.active) return;
+  const step = ONBOARDING_STEPS[onboarding.stepIndex];
+  const next = document.getElementById('onboarding-next');
+  const wait = document.getElementById('onboarding-wait');
+  if (!next || !step) return;
+  if (step.waitFor === 'space-name-entered') {
+    const hasName = Boolean(document.getElementById('new-space-name')?.value.trim());
+    next.disabled = !hasName;
+    if (wait) wait.textContent = hasName ? '👉 Для продовження: натисни "Створити"' : '👉 Для продовження: введи назву';
+    return;
+  }
+  next.disabled = Boolean(step.waitFor);
+}
+
 function waitForOnboardingTarget(step) {
   clearTimeout(onboarding.targetTimer);
+  onboarding.targetTimer = null;
   document.getElementById('onboarding-overlay')?.classList.remove('active');
   const selector = getOnboardingSelector(step);
   if (!selector || onboarding.targetTimer) return;
@@ -4498,27 +4843,29 @@ function waitForOnboardingTarget(step) {
       renderOnboardingStep();
       return;
     }
-    advanceOnboardingStep();
+    renderOnboardingMissingTarget(step);
   });
   onboarding.targetTimer = setTimeout(() => {}, 5000);
 }
 
-function renderOnboardingFinal(step) {
+function renderOnboardingMissingTarget(step) {
   const overlay = document.getElementById('onboarding-overlay');
-  overlay?.classList.add('active', 'welcome-mode');
-  overlay?.classList.remove('tour-mode');
-  document.getElementById('onboarding-card').style.display = 'none';
+  overlay?.classList.add('active', 'tour-mode');
+  overlay?.classList.remove('welcome-mode');
+  document.getElementById('onboarding-welcome').style.display = 'none';
+  document.getElementById('onboarding-card').style.display = 'block';
   document.getElementById('onboarding-spotlight').style.display = 'none';
-  const welcome = document.getElementById('onboarding-welcome');
-  welcome.style.display = 'block';
-  welcome.innerHTML = `
-    <div class="onboarding-welcome-kicker">TOUR COMPLETE</div>
-    <h2>${escHtml(step.title)}</h2>
-    <p>${escHtml(step.text)}</p>
-    <div class="onboarding-actions welcome-actions">
-      <button onclick="completeOnboardingTour()">Почати роботу</button>
-    </div>
-  `;
+  document.getElementById('onboarding-progress').textContent = `Крок ${onboarding.stepIndex + 1} з ${ONBOARDING_STEPS.length}`;
+  document.getElementById('onboarding-title').textContent = step.title || 'Потрібне місце не знайдено';
+  document.getElementById('onboarding-text').textContent = 'Я не бачу потрібну кнопку або блок. Закрий зайві вікна або повернись на потрібний екран.';
+  document.getElementById('onboarding-back').disabled = onboarding.stepIndex === 0;
+  const next = document.getElementById('onboarding-next');
+  const wait = document.getElementById('onboarding-wait');
+  next.textContent = step.final ? 'Завершити' : 'Далі';
+  next.disabled = Boolean(step.waitFor);
+  wait.textContent = step.waitFor ? 'Після потрібної дії тур продовжиться сам.' : '';
+  onboarding.waitingFor = step.waitFor || null;
+  positionOnboardingCard(null);
 }
 
 function startOnboardingTour({ force = false, welcome = true } = {}) {
@@ -4527,8 +4874,17 @@ function startOnboardingTour({ force = false, welcome = true } = {}) {
   onboarding.mode = welcome ? 'welcome' : 'tour';
   onboarding.stepIndex = force || welcome ? 0 : Math.max(0, Math.min(Number(localStorage.getItem(ONBOARDING_STEP_KEY) || 0), ONBOARDING_STEPS.length - 1));
   onboarding.nodeCreateCount = getSpaceNodes().length;
+  onboarding.createdNodeIds = [];
   onboarding.lastNodeId = null;
+  onboarding.firstNodeId = null;
+  onboarding.secondNodeId = null;
+  onboarding.lastEdgeId = null;
+  onboarding.createdSpaceId = null;
+  onboarding.pendingCanvasRect = null;
+  onboarding.connectionSource = null;
+  onboarding.simpleConnectSourceId = null;
   onboarding.targetStartedAt = 0;
+  onboarding.enteredStepIndex = -1;
   if (welcome) renderOnboardingWelcome();
   else renderOnboardingStep();
 }
@@ -4537,6 +4893,7 @@ function beginOnboardingTour() {
   onboarding.mode = 'tour';
   onboarding.stepIndex = 0;
   onboarding.targetStartedAt = 0;
+  onboarding.enteredStepIndex = -1;
   renderOnboardingStep();
 }
 
@@ -4550,11 +4907,16 @@ function restartOnboardingTour() {
 function completeOnboardingTour() {
   onboarding.active = false;
   onboarding.waitingFor = null;
+  document.body.classList.remove('onboarding-connection-mode');
+  document.body.classList.remove('onboarding-simple-connect-mode');
+  emitLinkorEvent('onboarding-finished');
   clearTimeout(onboarding.targetTimer);
   clearOnboardingTarget();
   localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
   localStorage.removeItem(ONBOARDING_STEP_KEY);
   document.getElementById('onboarding-overlay')?.classList.remove('active');
+  document.getElementById('onboarding-canvas-target')?.remove();
+  document.getElementById('onboarding-action-proxy')?.remove();
   renderOutdatedBanner();
 }
 
@@ -4572,42 +4934,84 @@ function nextOnboardingStep() {
   if (step?.waitFor) return;
   onboarding.stepIndex = Math.min(ONBOARDING_STEPS.length - 1, onboarding.stepIndex + 1);
   onboarding.targetStartedAt = 0;
+  onboarding.enteredStepIndex = -1;
   setTimeout(renderOnboardingStep, 40);
 }
 
 function prevOnboardingStep() {
   if (!onboarding.active) return;
   onboarding.stepIndex = Math.max(0, onboarding.stepIndex - 1);
+  onboarding.enteredStepIndex = -1;
   renderOnboardingStep();
 }
 
 function advanceOnboardingStep(delay = 120) {
+  onboarding.waitingFor = null;
   onboarding.stepIndex = Math.min(ONBOARDING_STEPS.length - 1, onboarding.stepIndex + 1);
   onboarding.targetStartedAt = 0;
+  onboarding.enteredStepIndex = -1;
   setTimeout(renderOnboardingStep, delay);
 }
 
-function handleOnboardingEvent(eventName) {
+function handleOnboardingEvent(eventName, detail = {}) {
   if (!onboarding.active) return;
+  if (eventName === 'create-node-mode-enabled') {
+    if (onboarding.waitingFor === 'create-node-mode-enabled') {
+      advanceOnboardingStep(120);
+    }
+    return;
+  }
+  if (eventName === 'space-name-entered') {
+    if (onboarding.waitingFor === 'space-name-entered') {
+      advanceOnboardingStep(120);
+    }
+    return;
+  }
+  if (eventName === 'connection-started') {
+    if (onboarding.waitingFor === 'connection-started') {
+      advanceOnboardingStep(80);
+    }
+    return;
+  }
   if (eventName === 'node-created') {
     onboarding.nodeCreateCount = Math.max(onboarding.nodeCreateCount, getSpaceNodes().length);
-    onboarding.lastNodeId = state.selectedNodeId || onboarding.lastNodeId;
-    if (onboarding.waitingFor === 'second-node-created' && onboarding.nodeCreateCount >= 2) {
+    const nodeId = detail.nodeId || detail.id || state.selectedNodeId;
+    if (nodeId && !onboarding.createdNodeIds.includes(nodeId)) onboarding.createdNodeIds.push(nodeId);
+    onboarding.lastNodeId = nodeId || onboarding.lastNodeId;
+    if (!onboarding.firstNodeId) onboarding.firstNodeId = nodeId || onboarding.firstNodeId;
+    else if (nodeId !== onboarding.firstNodeId && !onboarding.secondNodeId) onboarding.secondNodeId = nodeId;
+    if (onboarding.waitingFor === 'first-node-created' && onboarding.createdNodeIds.length >= 1) {
+      setTool('select');
+      advanceOnboardingStep();
+      return;
+    }
+    if (onboarding.waitingFor === 'second-node-created' && onboarding.createdNodeIds.length >= 2) {
+      setTool('select');
       advanceOnboardingStep();
       return;
     }
   }
+  if (eventName === 'first-node-created') {
+    onboarding.firstNodeId = detail.nodeId || detail.id || onboarding.firstNodeId || state.selectedNodeId;
+  }
+  if (eventName === 'second-node-created') {
+    onboarding.secondNodeId = detail.nodeId || detail.id || onboarding.secondNodeId || state.selectedNodeId;
+  }
+  if (eventName === 'edge-created') {
+    onboarding.lastEdgeId = detail.edgeId || detail.id || onboarding.lastEdgeId;
+  }
   if (eventName === 'space-created' && onboarding.waitingFor === 'space-created') {
-    const newest = state.spaces[0];
-    if (newest) setTimeout(() => openSpace(newest.id), 120);
+    onboarding.createdSpaceId = detail.spaceId || detail.id || state.spaces[0]?.id || onboarding.createdSpaceId;
+    showPage('hub');
+    renderHub();
   }
   if (onboarding.waitingFor === eventName) {
     advanceOnboardingStep(160);
   }
 }
 
-['space-create-modal-opened', 'space-modal-opened', 'space-created', 'space-opened', 'node-created', 'edge-created', 'subtopic-created'].forEach(name => {
-  window.addEventListener(`linkor:${name}`, () => handleOnboardingEvent(name));
+['space-create-modal-opened', 'space-modal-opened', 'space-name-entered', 'space-template-selected', 'space-color-selected', 'space-created', 'space-card-opened', 'space-opened', 'create-node-mode-enabled', 'node-created', 'first-node-created', 'second-node-created', 'connection-started', 'edge-created', 'subtopic-created', 'onboarding-finished'].forEach(name => {
+  window.addEventListener(`linkor:${name}`, event => handleOnboardingEvent(name, event.detail || {}));
 });
 
 window.addEventListener('resize', () => {
@@ -4622,6 +5026,18 @@ window.resetLinkorOnboarding = function() {
   localStorage.removeItem(ONBOARDING_COMPLETED_KEY);
   localStorage.removeItem(ONBOARDING_STEP_KEY);
   location.reload();
+};
+
+window.startLinkorOnboardingDebug = function() {
+  localStorage.removeItem(ONBOARDING_COMPLETED_KEY);
+  localStorage.removeItem(ONBOARDING_STEP_KEY);
+  onboarding.debug = true;
+  if (!state.currentUser) {
+    showPage('gate');
+    return;
+  }
+  showPage('hub');
+  setTimeout(() => startOnboardingTour({ force: true, welcome: true }), 80);
 };
 
 // ===== EVENT LISTENERS =====
@@ -4737,6 +5153,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (state.connectSource) updateTempEdge(e);
   });
   document.addEventListener('mouseup', (e) => {
+    handleOnboardingConnectionMouseUp(e);
     if (state.selecting) finishSelectionBox();
     if (state.cutting) finishCutting();
     if (state.connectSource) finishConnectFromEvent(e);

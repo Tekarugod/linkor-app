@@ -1255,11 +1255,10 @@ body::before {
   box-shadow: 0 0 8px rgba(0,245,255,0.28);
   transition: inset 0.16s ease, background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
-.node-anchor-top { top: -12px; left: 50%; transform: translateX(-50%); }
-.node-anchor-right { right: -12px; top: 50%; transform: translateY(-50%); }
-.node-anchor-bottom { bottom: -12px; left: 50%; transform: translateX(-50%); }
-.node-anchor-left { left: -12px; top: 50%; transform: translateY(-50%); }
-.node:hover .node-anchor,
+.node-anchor-top { top: -14px; left: 50%; transform: translateX(-50%); }
+.node-anchor-right { right: -14px; top: 50%; transform: translateY(-50%); }
+.node-anchor-bottom { bottom: -14px; left: 50%; transform: translateX(-50%); }
+.node-anchor-left { left: -17px; top: 50%; transform: translateY(-50%); }.node:hover .node-anchor,
 .node.selected .node-anchor,
 .node-anchor:hover,
 .node-anchor.connection-target-anchor {
@@ -1284,6 +1283,23 @@ body::before {
 .node-anchor-left:hover,
 .node-anchor-right.connection-target-anchor,
 .node-anchor-left.connection-target-anchor { transform: translateY(-50%) scale(1.12); }
+body.onboarding-connection-mode .node-anchor {
+  pointer-events: none;
+  opacity: 0.25;
+}
+body.onboarding-connection-mode .node-anchor.onboarding-active-target {
+  pointer-events: auto;
+  opacity: 1;
+}
+body.onboarding-simple-connect-mode .node {
+  cursor: pointer;
+}
+body.onboarding-simple-connect-mode .node:not(.onboarding-active-target) {
+  opacity: 0.56;
+}
+body.onboarding-simple-connect-mode .node.onboarding-active-target {
+  opacity: 1;
+}
 
 /* search highlight */
 .node.search-highlight {
@@ -1717,20 +1733,53 @@ body::before {
     0 0 0 9999px rgba(1, 5, 12, 0.62),
     0 0 28px rgba(0,245,255,0.34),
     inset 0 0 18px rgba(0,245,255,0.08);
-  transition: all 0.2s ease;
+  transform: translateZ(0);
+  transition:
+    left 0.22s ease,
+    top 0.22s ease,
+    width 0.22s ease,
+    height 0.22s ease,
+    opacity 0.18s ease,
+    border-radius 0.22s ease;
 }
 .onboarding-active-target {
   position: relative !important;
-  z-index: 9015 !important;
+  z-index: 9040 !important;
   box-shadow: 0 0 0 1px rgba(113,239,255,0.72), 0 0 24px rgba(0,245,255,0.3) !important;
 }
-.onboarding-welcome {
+.node-anchor.onboarding-active-target {
+  position: absolute !important;
+  z-index: 9060 !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+.onboarding-canvas-target {
   position: fixed;
+  cursor: crosshair;
+  pointer-events: auto;
+  z-index: 9016;
+}
+.onboarding-canvas-target.onboarding-active-target {
+  position: fixed !important;
+}
+.onboarding-action-proxy {
+  position: fixed;
+  z-index: 9050;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: crosshair;
+  padding: 0;
+  pointer-events: none;
+}
+.onboarding-welcome {
+  position: fixed !important;
   z-index: 9030;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) !important;
   width: min(560px, calc(100vw - 40px));
+  max-width: 560px;
   border: 1px solid rgba(0,245,255,0.42);
   border-radius: 10px;
   background:
@@ -1739,6 +1788,7 @@ body::before {
   box-shadow: 0 30px 90px rgba(0,0,0,0.62), 0 0 44px rgba(0,245,255,0.16);
   padding: 30px;
   pointer-events: auto;
+  box-sizing: border-box;
 }
 .onboarding-welcome-kicker {
   color: var(--accent);
@@ -1775,12 +1825,21 @@ body::before {
   position: fixed;
   z-index: 9020;
   width: min(340px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  overflow: auto;
   border: 1px solid rgba(0,245,255,0.42);
   border-radius: 8px;
   background: linear-gradient(180deg, rgba(9,20,38,0.98), rgba(4,9,20,0.98));
   box-shadow: 0 24px 70px rgba(0,0,0,0.58), 0 0 30px rgba(0,245,255,0.16);
   padding: 16px;
   pointer-events: auto;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease, left 0.22s ease, top 0.22s ease;
+}
+.onboarding-card.visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 .onboarding-progress {
   color: var(--accent);
@@ -1830,6 +1889,7 @@ body::before {
 .onboarding-actions button:disabled {
   opacity: 0.35;
   cursor: default;
+  pointer-events: none;
 }
 .structured-view {
   position: absolute;
