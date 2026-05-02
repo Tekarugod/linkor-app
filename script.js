@@ -5,6 +5,9 @@ let latestAppVersion = '';
 let updateReadyToInstall = false;
 let updateCheckMode = 'manual';
 let availableUpdateInfo = null;
+let updateCheckInProgress = false;
+let updateStatusState = null;
+let localChangelogCache = null;
 
 let state = {
   users: {},
@@ -845,6 +848,101 @@ function renderUpdateInstallButton() {
   button.disabled = !updateReadyToInstall;
 }
 
+function renderUpdateCheckButton() {
+  const button = document.getElementById('check-updates-btn');
+  if (!button) return;
+  button.disabled = updateCheckInProgress;
+  button.textContent = updateCheckInProgress ? 'Перевіряємо...' : 'Перевірити оновлення';
+}
+
+function ensureUpdateStatusBlock() {
+  const button = document.querySelector('[data-tour="check-updates"]');
+  if (!button) return;
+  button.id = 'check-updates-btn';
+  renderUpdateCheckButton();
+  if (!document.getElementById('update-status-block')) {
+    const block = document.createElement('div');
+    block.id = 'update-status-block';
+    block.className = 'update-status-block';
+    block.style.display = 'none';
+    button.insertAdjacentElement('afterend', block);
+  }
+  if (updateStatusState) renderUpdateStatusBlock(updateStatusState);
+}
+
+function normalizeReleaseNotes(notes) {
+  if (!notes) return [];
+  if (Array.isArray(notes)) {
+    return notes
+      .map(item => typeof item === 'string' ? item : item?.note || item?.content || '')
+      .flatMap(normalizeReleaseNotes)
+      .filter(Boolean);
+  }
+
+  return String(notes)
+    .split(/\r?\n/)
+    .map(line => line
+      .replace(/^#{1,6}\s*/, '')
+      .replace(/^[-*]\s+/, '')
+      .replace(/^\d+\.\s+/, '')
+      .replace(/\*\*/g, '')
+      .replace(/`/g, '')
+      .trim())
+    .filter(line => line && !/^what'?s new/i.test(line) && !/^changelog/i.test(line));
+}
+
+async function getLocalChangelog(version) {
+  try {
+    if (!localChangelogCache) {
+      localChangelogCache = await window.nodusBridge?.getChangelog?.() || {};
+    }
+    return localChangelogCache?.[String(version).replace(/^v/i, '')] || null;
+  } catch (error) {
+    console.warn('Changelog load failed:', error);
+    return null;
+  }
+}
+
+function renderUpdateStatusBlock(status) {
+  updateStatusState = status || updateStatusState;
+  const block = document.getElementById('update-status-block');
+  if (!block || !updateStatusState) return;
+
+  const stateName = updateStatusState.state || 'idle';
+  const version = updateStatusState.version ? `v${updateStatusState.version}` : '';
+  const title = updateStatusState.title || '';
+  const message = updateStatusState.message || '';
+  const sections = Array.isArray(updateStatusState.sections) ? updateStatusState.sections : [];
+  const changes = Array.isArray(updateStatusState.changes) ? updateStatusState.changes : [];
+
+  let changesHtml = '';
+  if (sections.length) {
+    changesHtml = sections.map(section => `
+      <div class="update-changelog-section">
+        <div class="update-changelog-section-title">${escHtml(section.title || '')}</div>
+        <ul>${(section.changes || []).map(change => `<li>${escHtml(change)}</li>`).join('')}</ul>
+      </div>
+    `).join('');
+  } else if (changes.length) {
+    changesHtml = `<ul>${changes.map(change => `<li>${escHtml(change)}</li>`).join('')}</ul>`;
+  }
+
+  block.className = `update-status-block ${stateName}`;
+  block.innerHTML = `
+    <div class="update-status-kicker">${escHtml(updateStatusState.kicker || 'Статус оновлення')}</div>
+    <div class="update-status-title">${escHtml(title || message)}</div>
+    ${message && title ? `<div class="update-status-message">${escHtml(message)}</div>` : ''}
+    ${version && stateName === 'available' ? `<div class="update-status-subtitle">Що нового у ${escHtml(version)}:</div>` : ''}
+    ${changesHtml ? `<div class="update-changelog-list">${changesHtml}</div>` : ''}
+  `;
+  block.style.display = 'block';
+}
+
+function clearUpdateLoading() {
+  updateCheckInProgress = false;
+  renderUpdateCheckButton();
+}
+
 async function checkForUpdates() {
   try {
     updateCheckMode = 'manual';
@@ -856,6 +954,41 @@ async function checkForUpdates() {
   } catch (error) {
     console.warn('Update check failed:', error);
     showToast(`Не вдалося перевірити оновлення: ${error.message}`);
+  }
+}
+
+async function checkForUpdates() {
+  try {
+    updateCheckMode = 'manual';
+    updateReadyToInstall = false;
+    updateCheckInProgress = true;
+    renderUpdateInstallButton();
+    renderUpdateCheckButton();
+    renderUpdateStatusBlock({
+      state: 'checking',
+      title: 'Перевіряємо оновлення...',
+      message: 'Зачекайте кілька секунд.'
+    });
+    showToast('Перевіряю оновлення...');
+    const result = await window.nodusBridge?.checkForUpdates?.();
+    if (result?.message && result.ok === false) {
+      clearUpdateLoading();
+      renderUpdateStatusBlock({
+        state: 'error',
+        title: 'Не вдалося перевірити оновлення.',
+        message: result.message
+      });
+      showToast(result.message);
+    }
+  } catch (error) {
+    console.warn('Update check failed:', error);
+    clearUpdateLoading();
+    renderUpdateStatusBlock({
+      state: 'error',
+      title: 'Не вдалося перевірити оновлення.',
+      message: 'Перевірте інтернет або спробуйте пізніше.'
+    });
+    showToast('Не вдалося перевірити оновлення. Перевірте інтернет або спробуйте пізніше.');
   }
 }
 
@@ -978,6 +1111,62 @@ window.nodusBridge?.onUpdateChecking?.(() => {
   updateReadyToInstall = false;
   renderUpdateInstallButton();
   showToast('Перевіряю оновлення...');
+});
+
+window.nodusBridge?.onUpdateAvailable?.(async (info) => {
+  if (updateCheckMode === 'silent' || !updateCheckInProgress) return;
+  clearUpdateLoading();
+  const version = info?.version || 'new';
+  const localChangelog = await getLocalChangelog(version);
+  const releaseChanges = normalizeReleaseNotes(info?.releaseNotes || info?.releaseName);
+  renderUpdateStatusBlock({
+    state: 'available',
+    version,
+    title: `Доступна нова версія Linkor: v${version}`,
+    message: localChangelog?.title || '',
+    sections: localChangelog?.sections || null,
+    changes: localChangelog?.changes || releaseChanges
+  });
+});
+
+window.nodusBridge?.onUpdateNotAvailable?.(async () => {
+  if (updateCheckMode === 'silent' || !updateCheckInProgress) return;
+  clearUpdateLoading();
+  if (!latestAppVersion) await loadAppVersion();
+  const version = latestAppVersion ? `v${latestAppVersion}` : '';
+  renderUpdateStatusBlock({
+    state: 'current',
+    title: `У вас встановлена остання версія Linkor${version ? `: ${version}` : ''}`
+  });
+});
+
+window.nodusBridge?.onUpdateDownloaded?.(() => {
+  if (updateStatusState?.state !== 'available') return;
+  clearUpdateLoading();
+  renderUpdateStatusBlock({
+    ...(updateStatusState || {}),
+    state: 'available',
+    message: 'Оновлення завантажено. Перезапустіть Linkor для встановлення.'
+  });
+});
+
+window.nodusBridge?.onUpdateError?.(() => {
+  if (updateCheckMode === 'silent' || !updateCheckInProgress) return;
+  clearUpdateLoading();
+  renderUpdateStatusBlock({
+    state: 'error',
+    title: 'Не вдалося перевірити оновлення.',
+    message: 'Перевірте інтернет або спробуйте пізніше.'
+  });
+});
+
+window.nodusBridge?.onUpdateChecking?.(() => {
+  if (updateCheckMode === 'silent') return;
+  renderUpdateStatusBlock({
+    state: 'checking',
+    title: 'Перевіряємо оновлення...',
+    message: 'Зачекайте кілька секунд.'
+  });
 });
 
 function setText(selector, value) {
@@ -1208,6 +1397,7 @@ async function doLogin() {
 
     if (result?.ok) {
       const nick = result.user?.nick || email.split('@')[0];
+      if (result.sessionSaved) console.log('[auth] token saved');
 
       if (!state.users[email]) {
         state.users[email] = {
@@ -1292,6 +1482,7 @@ async function doRegister() {
       return;
     }
 
+    if (result.sessionSaved) console.log('[auth] token saved');
     state.users[email] = state.users[email] || {};
     state.users[email].nick = nick;
     state.users[email].pass = '';
@@ -1337,6 +1528,57 @@ async function doLogout() {
   state.edges = {};
   saveState();
   showPage('gate');
+}
+
+async function restoreAuthOnStartup() {
+  if (!window.nodusBridge?.authRestore) {
+    console.log('[auth] no token found');
+    return false;
+  }
+
+  const result = await window.nodusBridge.authRestore();
+  if (!result?.restored || !result?.user?.email) {
+    console.log('[auth] no token found');
+    state.currentUser = null;
+    state.selectedNodeId = null;
+    state.connectSource = null;
+    state.spaces = [];
+    state.nodes = {};
+    state.edges = {};
+    saveState({ markUnsynced: false });
+    return false;
+  }
+
+  const email = result.user.email;
+  const nick = result.user.nick || email.split('@')[0];
+
+  console.log('[auth] token restored');
+
+  state.users[email] = state.users[email] || {
+    nick,
+    pass: '',
+    supabaseId: result.user.id,
+    createdAt: Date.now(),
+    data: {
+      spaces: [],
+      nodes: {},
+      edges: {},
+      nodeIdCounter: 0,
+      edgeIdCounter: 0,
+      spaceIdCounter: 0
+    }
+  };
+  state.users[email].nick = nick;
+  state.users[email].supabaseId = result.user.id;
+  state.currentUser = email;
+  hydrateCurrentUserData();
+
+  if (typeof loadCurrentUserFromSupabase === 'function') {
+    await loadCurrentUserFromSupabase();
+  }
+
+  saveState({ markUnsynced: false });
+  return true;
 }
 
 function createDemoData() {
@@ -3364,6 +3606,7 @@ function renderSettings(tab) {
     `;
     loadAppVersion();
     renderUpdateInstallButton();
+    ensureUpdateStatusBlock();
   }
 }
 
@@ -4382,8 +4625,9 @@ window.resetLinkorOnboarding = function() {
 };
 
 // ===== EVENT LISTENERS =====
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   loadState();
+  await restoreAuthOnStartup();
   applyAccentColor();
   if (state.theme) applyTheme(state.theme, true);
   if (state.currentUser) showPage('hub');

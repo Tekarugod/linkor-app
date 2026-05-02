@@ -1,10 +1,107 @@
 const { supabase } = require('./supabaseClient');
 const path = require('path');
+const fs = require('fs');
 const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 
 let currentSupabaseUserId = null;
 let mainWindow = null;
+
+function getAuthSessionPath() {
+  return path.join(app.getPath('userData'), 'auth-session.json');
+}
+
+function writeAuthSession(session) {
+  if (!session?.access_token || !session?.refresh_token) return false;
+
+  fs.mkdirSync(app.getPath('userData'), { recursive: true });
+  fs.writeFileSync(getAuthSessionPath(), JSON.stringify({
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    expires_at: session.expires_at || null,
+    token_type: session.token_type || 'bearer',
+    user: session.user ? {
+      id: session.user.id,
+      email: session.user.email,
+      user_metadata: session.user.user_metadata || {}
+    } : null
+  }, null, 2), 'utf8');
+
+  console.log('[auth] token saved');
+  return true;
+}
+
+function clearAuthSession() {
+  try {
+    const sessionPath = getAuthSessionPath();
+    if (fs.existsSync(sessionPath)) fs.unlinkSync(sessionPath);
+  } catch (error) {
+    console.warn('[auth] failed to clear stored session:', error.message);
+  }
+}
+
+function readAuthSession() {
+  try {
+    const sessionPath = getAuthSessionPath();
+    if (!fs.existsSync(sessionPath)) {
+      console.log('[auth] no token found');
+      return null;
+    }
+
+    const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+    if (!session?.access_token || !session?.refresh_token) {
+      console.log('[auth] no token found');
+      return null;
+    }
+
+    return session;
+  } catch (error) {
+    console.warn('[auth] failed to read stored session:', error.message);
+    return null;
+  }
+}
+
+async function restoreAuthSession() {
+  const session = readAuthSession();
+  if (!session) return { ok: false, restored: false, reason: 'no-token' };
+
+  const { data, error } = await supabase.auth.setSession({
+    access_token: session.access_token,
+    refresh_token: session.refresh_token
+  });
+
+  if (error || !data.session?.user) {
+    console.warn('[auth] stored token restore failed:', error?.message || 'No user in restored session');
+    clearAuthSession();
+    currentSupabaseUserId = null;
+    return { ok: false, restored: false, reason: 'invalid-token', error: error?.message };
+  }
+
+  currentSupabaseUserId = data.session.user.id;
+  writeAuthSession(data.session);
+  console.log('[auth] token restored');
+
+  return {
+    ok: true,
+    restored: true,
+    user: {
+      id: data.session.user.id,
+      email: data.session.user.email,
+      nick: data.session.user.user_metadata?.nick || data.session.user.email?.split('@')[0] || 'User'
+    }
+  };
+}
+
+function readLocalChangelog() {
+  try {
+    const changelogPath = path.join(__dirname, 'changelog.json');
+    if (!fs.existsSync(changelogPath)) return {};
+    return JSON.parse(fs.readFileSync(changelogPath, 'utf8'));
+  } catch (error) {
+    console.warn('[updates] failed to read changelog:', error.message);
+    return {};
+  }
+}
 
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
@@ -48,6 +145,8 @@ ipcMain.handle('app:quit', async () => {
 
 ipcMain.handle('app:version', () => app.getVersion());
 
+ipcMain.handle('app:get-changelog', () => readLocalChangelog());
+
 ipcMain.handle('app:open-external', async (_event, url) => {
   await shell.openExternal(url);
   return { ok: true };
@@ -84,6 +183,9 @@ ipcMain.handle('app:install-update', () => {
 async function getCurrentSupabaseUserId() {
   if (currentSupabaseUserId) return currentSupabaseUserId;
 
+  await restoreAuthSession();
+  if (currentSupabaseUserId) return currentSupabaseUserId;
+
   const { data, error } = await supabase.auth.getUser();
   if (!error && data.user?.id) {
     currentSupabaseUserId = data.user.id;
@@ -105,9 +207,11 @@ ipcMain.handle('auth:register', async (event, { email, password, nick } = {}) =>
     if (error) return { ok: false, error: error.message };
 
     currentSupabaseUserId = data.user?.id || null;
+    const sessionSaved = writeAuthSession(data.session);
 
     return {
       ok: true,
+      sessionSaved,
       user: {
         id: data.user?.id,
         email: data.user?.email || email,
@@ -130,6 +234,7 @@ ipcMain.handle('auth:login', async (event, { email, password } = {}) => {
     if (!data.user?.id) return { ok: false, error: 'Supabase login did not return a user.' };
 
     currentSupabaseUserId = data.user.id;
+    const sessionSaved = writeAuthSession(data.session);
 
     const nick =
       data.user?.user_metadata?.nick ||
@@ -138,6 +243,7 @@ ipcMain.handle('auth:login', async (event, { email, password } = {}) => {
 
     return {
       ok: true,
+      sessionSaved,
       user: {
         id: data.user.id,
         email: data.user.email,
@@ -157,7 +263,16 @@ ipcMain.handle('auth:logout', async () => {
   } catch (error) {
     return { ok: false, error: error.message };
   } finally {
+    clearAuthSession();
     currentSupabaseUserId = null;
+  }
+});
+
+ipcMain.handle('auth:restore', async () => {
+  try {
+    return await restoreAuthSession();
+  } catch (error) {
+    return { ok: false, restored: false, error: error.message };
   }
 });
 

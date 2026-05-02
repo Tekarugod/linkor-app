@@ -6,12 +6,14 @@ contextBridge.exposeInMainWorld('nodusBridge', {
   authRegister: (payload) => ipcRenderer.invoke('auth:register', payload),
   authLogin: (payload) => ipcRenderer.invoke('auth:login', payload),
   authLogout: () => ipcRenderer.invoke('auth:logout'),
+  authRestore: () => ipcRenderer.invoke('auth:restore'),
 
   cloudPush: (payload) => ipcRenderer.invoke('cloud:push', payload),
   cloudPull: () => ipcRenderer.invoke('cloud:pull'),
 
   appQuit: () => ipcRenderer.invoke('app:quit'),
   getAppVersion: () => ipcRenderer.invoke('app:version'),
+  getChangelog: () => ipcRenderer.invoke('app:get-changelog'),
   checkForUpdates: () => ipcRenderer.invoke('app:check-updates'),
   checkForUpdatesSilent: () => ipcRenderer.invoke('app:check-updates-silent'),
   downloadUpdate: () => ipcRenderer.invoke('app:download-update'),
