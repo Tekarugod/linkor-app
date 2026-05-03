@@ -111,10 +111,11 @@
                     <div class="quick-capture" data-tour="quick-capture">
                         <div class="engine-sidebar-title">// Quick Capture</div>
                         <textarea id="quick-capture-input" class="quick-capture-input" placeholder="One thought per line..."></textarea>
-                        <div class="think-row">
-                            <button class="quick-capture-btn" onclick="quickCapture()"><span>+ CAPTURE</span></button>
-                            <button class="quick-capture-btn" onclick="runThinkingModeFromQuick()"><span>THINK</span></button>
-                        </div>
+                       <div class="think-row">
+                            <button id="quick-ai-generate-btn" class="quick-capture-btn quick-ai-generate-btn" onclick="handleAIGenerate('quick')">
+                                 <span>🧠 Згенерувати вузли</span>
+                            </button>
+                    </div>
                     </div>
                     <div class="connection-suggestions" id="connection-suggestions">
                         <div class="engine-sidebar-title">// Suggested Links</div>
@@ -195,6 +196,9 @@
                             <button class="canvas-ctrl-btn" onclick="fitView()" style="font-size:12px">⊡</button>
                             <button class="canvas-ctrl-btn" id="snap-grid-toggle" onclick="toggleSnapGrid()">⌗</button>
                         </div>
+                        <button class="tool-btn hotkeys-help-btn" onclick="showHotkeysHelp()">
+                            <span class="tool-btn-icon">⌘</span> Hotkeys
+                        </button>
                     </div>
                 </div>
             </div>
@@ -288,12 +292,26 @@
                 <div class="node-editor-title">// AI Ассистент</div>
                      <button class="editor-close-btn" onclick="toggleAIPanel()" style="margin-bottom:16px;">× ЗАКРЫТЬ</button>
                 <textarea id="ai-prompt-input" class="ai-prompt-input" placeholder="Describe what you want to think through..."></textarea>
-                <div class="ai-action-grid">
-                    <button onclick="runThinkingModeFromAI()">Think</button>
-                    <button onclick="aiGenerateNodes()">Generate nodes</button>
-                    <button onclick="smartConnect()">Auto-link</button>
-                    <button onclick="renderAISummary()">Summary</button>
-                </div>
+                <div class="ai-dev-note">
+    ⚠️ AI-помічник у розробці. Зараз Linkor використовує розумні заготовки для найпоширеніших сценаріїв.
+</div>
+
+<select id="ai-preset-select" class="ai-preset-select">
+    <option value="auto">Автоматично підібрати заготовку</option>
+    <option value="student_exam">Студент: підготовка до іспиту / НМТ</option>
+    <option value="student_coursework">Студент: курсова / проєкт</option>
+    <option value="startup">Стартап / новий продукт</option>
+    <option value="cafe">Кавʼярня / локальний бізнес</option>
+    <option value="content">Контент-план / соцмережі</option>
+    <option value="daily">Повсякденні справи / план дня</option>
+    <option value="purchase">Покупка / вибір варіанту</option>
+    <option value="learning">Вивчення нової навички</option>
+</select>
+               <div class="ai-action-grid ai-action-grid-single">
+    <button id="ai-generate-btn" class="ai-generate-main" onclick="handleAIGenerate('panel')">
+        🧠 Згенерувати вузли
+    </button>
+</div>
                 <div class="ai-response" id="ai-response-content">
         Нажмите кнопку 🧠 AI в боковой панели для анализа.
          </div>
@@ -311,6 +329,7 @@
             <div class="editor-field">
                 <label class="editor-label">Теги (через запятую)</label>
                 <input class="editor-input" type="text" id="editor-tags" placeholder="идея, проект, важно">
+                <div class="tag-suggestions" id="tag-suggestions"></div>
             </div>
             <div class="editor-field">
                 <label class="editor-label">Тип узла</label>

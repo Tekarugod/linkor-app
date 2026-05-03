@@ -492,9 +492,12 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      devTools: true
     }
   });
+
+// mainWindow.webContents.openDevTools();
 
   mainWindow.loadFile(path.join(__dirname, 'neurospace.html'));
 

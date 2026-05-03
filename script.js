@@ -8,6 +8,13 @@ let availableUpdateInfo = null;
 let updateCheckInProgress = false;
 let updateStatusState = null;
 let localChangelogCache = null;
+let hubUpdateDetailsOpen = false;
+const MIN_ZOOM = 0.35;
+const MAX_ZOOM = 2.5;
+const WHEEL_ZOOM_SPEED = 0.0012;
+let spacePanning = false;
+let aiThinkingInProgress = false;
+let aiThinkingInterval = null;
 
 let state = {
   users: {},
@@ -24,11 +31,13 @@ let state = {
   viewMode: 'graph',
   selectedNodeId: null,
   selectedNodeIds: [],
+  selectedEdgeId: null,
   connectSource: null,
   selecting: null,
   cutting: null,
   groupDragging: null,
   history: [],
+  redoStack: [],
   snapshots: [],
   hasUnsyncedChanges: false,
   isCloudLoading: false,
@@ -644,6 +653,8 @@ function restoreGraphState(snapshot) {
   state.edgeIdCounter = snapshot.edgeIdCounter || state.edgeIdCounter;
   state.spaceIdCounter = snapshot.spaceIdCounter || state.spaceIdCounter;
   state.selectedNodeId = null;
+  state.selectedNodeIds = [];
+  state.selectedEdgeId = null;
   state.connectSource = null;
 }
 
@@ -651,17 +662,35 @@ function captureHistory(label = 'Change') {
   state.history = state.history || [];
   state.history.push({ label, at: Date.now(), data: cloneGraphState() });
   if (state.history.length > 40) state.history.shift();
+  state.redoStack = [];
 }
 
 function undoLastChange() {
   setActiveSidebarGroup('history');
   const item = state.history?.pop();
   if (!item) { showToast(tr('noHistory')); return; }
+  state.redoStack = state.redoStack || [];
+  state.redoStack.push({ label: item.label, at: Date.now(), data: cloneGraphState() });
+  if (state.redoStack.length > 40) state.redoStack.shift();
   restoreGraphState(item.data);
   saveState();
   if (document.getElementById('hub')?.classList.contains('active')) renderHub();
   if (document.getElementById('engine')?.classList.contains('active')) renderEngine();
   showToast(`${tr('undo')}: ${item.label}`);
+}
+
+function redoLastChange() {
+  setActiveSidebarGroup('history');
+  const item = state.redoStack?.pop();
+  if (!item) { showToast('Redo: nothing to restore'); return; }
+  state.history = state.history || [];
+  state.history.push({ label: item.label, at: Date.now(), data: cloneGraphState() });
+  if (state.history.length > 40) state.history.shift();
+  restoreGraphState(item.data);
+  saveState();
+  if (document.getElementById('hub')?.classList.contains('active')) renderHub();
+  if (document.getElementById('engine')?.classList.contains('active')) renderEngine();
+  showToast(`Redo: ${item.label}`);
 }
 
 function createVersionSnapshot(label) {
@@ -710,6 +739,7 @@ function loadState() {
       state.snapToGrid = Boolean(saved.snapToGrid);
       state.sidebarSections = { thinking: true, editing: true, organize: true, view: true, history: true, stats: false, ...(saved.sidebarSections || {}) };
       state.history = saved.history || [];
+      state.redoStack = saved.redoStack || [];
       state.snapshots = saved.snapshots || [];
       state.hasUnsyncedChanges = Boolean(saved.hasUnsyncedChanges);
       state.nodeIdCounter = saved.nodeIdCounter || 1;
@@ -744,6 +774,7 @@ function saveState(options = {}) {
       snapToGrid: state.snapToGrid,
       sidebarSections: state.sidebarSections,
       history: state.history,
+      redoStack: state.redoStack,
       snapshots: state.snapshots,
       hasUnsyncedChanges: state.hasUnsyncedChanges,
       nodeIdCounter: state.nodeIdCounter,
@@ -1005,28 +1036,82 @@ async function checkForUpdatesSilent() {
   }
 }
 
-function renderOutdatedBanner() {
+async function renderOutdatedBanner() {
   const banner = document.getElementById('outdated-version-banner');
   if (!banner) return;
+
   if (!availableUpdateInfo || isOnboardingActive()) {
     banner.style.display = 'none';
     return;
   }
-  const version = String(availableUpdateInfo.version || 'new');
+
+  const version = String(availableUpdateInfo.version || 'new').replace(/^v/i, '');
   if (localStorage.getItem('linkorOutdatedBannerDismissedVersion') === version) {
     banner.style.display = 'none';
     return;
   }
+
+  const changelog = await getLocalChangelog(version);
+  const releaseChanges = normalizeReleaseNotes(availableUpdateInfo?.releaseNotes || availableUpdateInfo?.releaseName);
+  const sectionsHtml = renderHubUpdateChangelog(changelog, releaseChanges);
+
   banner.innerHTML = `
-    <div><strong>Доступна нова версія Linkor.</strong><span>Оновіть її в Налаштування → Про систему → Перевірити оновлення.</span></div>
-    <button onclick="openAboutSettingsFromBanner()">Перейти до Про систему</button>
-    <button class="outdated-banner-close" onclick="dismissOutdatedBanner('${escAttr(version)}')">×</button>
+    <div class="hub-update-main">
+      <div class="hub-update-icon">⬆</div>
+      <div class="hub-update-copy">
+        <div class="hub-update-kicker">Нове оновлення доступне</div>
+        <div class="hub-update-title">Linkor v${escHtml(version)} готовий до встановлення</div>
+        <div class="hub-update-text">Ми покращили стабільність, екскурс, теги та керування. Рекомендуємо оновитись зараз.</div>
+      </div>
+    </div>
+
+    <div class="hub-update-actions">
+      <button class="hub-update-primary" onclick="${updateReadyToInstall ? 'installUpdate()' : 'downloadUpdate()'}">${updateReadyToInstall ? 'Перезапустити і встановити' : 'Завантажити'}</button>
+      <button class="hub-update-secondary" onclick="toggleHubUpdateDetails()">Що нового</button>
+      <button class="hub-update-ghost" onclick="dismissOutdatedBanner('${escAttr(version)}')">Пізніше</button>
+    </div>
+
+    <div id="hub-update-details" class="hub-update-details" style="display:${hubUpdateDetailsOpen ? 'block' : 'none'}">
+      <div class="hub-update-details-title">Що нового у v${escHtml(version)}</div>
+      ${sectionsHtml || '<div class="hub-update-empty">Список змін буде доступний після публікації релізу.</div>'}
+    </div>
   `;
-  banner.style.display = 'flex';
+
+  banner.style.display = 'grid';
+}
+
+function renderHubUpdateChangelog(changelog, releaseChanges = []) {
+  if (changelog?.sections) {
+    const sections = Array.isArray(changelog.sections)
+      ? changelog.sections
+      : Object.entries(changelog.sections).map(([title, changes]) => ({ title, changes }));
+
+    return sections.map(section => `
+      <div class="hub-update-section">
+        <div class="hub-update-section-title">${escHtml(section.title || '')}</div>
+        <ul>${(section.changes || []).map(change => `<li>${escHtml(change)}</li>`).join('')}</ul>
+      </div>
+    `).join('');
+  }
+
+  const changes = changelog?.changes || releaseChanges || [];
+  if (!changes.length) return '';
+
+  return `
+    <div class="hub-update-section">
+      <ul>${changes.map(change => `<li>${escHtml(change)}</li>`).join('')}</ul>
+    </div>
+  `;
+}
+
+function toggleHubUpdateDetails() {
+  hubUpdateDetailsOpen = !hubUpdateDetailsOpen;
+  renderOutdatedBanner();
 }
 
 function dismissOutdatedBanner(version) {
-  localStorage.setItem('linkorOutdatedBannerDismissedVersion', version || '');
+  localStorage.setItem('linkorOutdatedBannerDismissedVersion', String(version || '').replace(/^v/i, ''));
+  hubUpdateDetailsOpen = false;
   renderOutdatedBanner();
 }
 
@@ -1093,6 +1178,7 @@ window.nodusBridge?.onUpdateProgress?.((progress) => {
 window.nodusBridge?.onUpdateDownloaded?.(() => {
   updateReadyToInstall = true;
   renderUpdateInstallButton();
+  renderOutdatedBanner();
   showToast('Оновлення завантажено. Перезапустіть Linkor для встановлення.');
 });
 
@@ -1211,9 +1297,8 @@ function applyStaticTranslations() {
   setPlaceholder('#node-search', tr('searchNodes'));
   setText('.quick-capture .engine-sidebar-title', `// ${tr('quickCapture')}`);
   setPlaceholder('#quick-capture-input', tr('quickPlaceholder'));
-  const quickButtons = document.querySelectorAll('.quick-capture-btn span');
-  if (quickButtons[0]) quickButtons[0].textContent = tr('capture');
-  if (quickButtons[1]) quickButtons[1].textContent = tr('think');
+  const quickGenerateBtn = document.querySelector('#quick-ai-generate-btn span');
+  if (quickGenerateBtn) quickGenerateBtn.textContent = '🧠 Згенерувати вузли';
   setText('#connection-suggestions .engine-sidebar-title', `// ${tr('suggestedLinks')}`);
   const suggestionEmpty = document.querySelector('#connection-suggestions .suggestion-empty');
   if (suggestionEmpty) suggestionEmpty.textContent = tr('suggestEmpty');
@@ -1240,10 +1325,8 @@ function applyStaticTranslations() {
   setText('#ai-panel .node-editor-title', `// ${tr('aiAssistant')}`);
   setText('#ai-panel .editor-close-btn', `× ${tr('close')}`);
   setPlaceholder('#ai-prompt-input', tr('thinkingPlaceholder'));
-  const aiButtons = document.querySelectorAll('.ai-action-grid button');
-  [tr('think'), tr('generateNodes'), tr('autoLink'), tr('summary')].forEach((label, i) => {
-    if (aiButtons[i]) aiButtons[i].textContent = label;
-  });
+  const aiGenerateBtn = document.getElementById('ai-generate-btn');
+  if (aiGenerateBtn) aiGenerateBtn.textContent = '🧠 Згенерувати вузли';
   const viewButtons = document.querySelectorAll('#group-view .view-mode-btn');
   [tr('graphView'), tr('listView'), tr('timelineView'), tr('focusView')].forEach((label, i) => {
     if (viewButtons[i]) viewButtons[i].textContent = label;
@@ -1889,6 +1972,7 @@ function openNewSpaceModal() {
   newSpaceTemplate = 'blank';
   const modal = document.getElementById('modal');
   modal.querySelector('.modal-box')?.classList.remove('modal-box-wide');
+  modal.querySelector('.modal-box')?.setAttribute('data-tour', 'space-create-modal');
   document.getElementById('modal-title').textContent = `// ${tr('newSpace')}`;
   document.getElementById('modal-body').innerHTML = `
     <input class="modal-input" type="text" id="new-space-name" data-tour="space-title" placeholder="${tr('newSpace')}..." autofocus>
@@ -1916,23 +2000,17 @@ function openNewSpaceModal() {
   modal.style.display = 'flex';
   emitLinkorEvent('space-modal-opened');
   emitLinkorEvent('space-create-modal-opened');
-  requestAnimationFrame(() => {
-    if (isOnboardingActive()) renderOnboardingStep();
-  });
-  setTimeout(() => {
-    if (isOnboardingActive()) renderOnboardingStep();
-  }, 50);
   setTimeout(() => {
     const input = document.getElementById('new-space-name');
     if (input) {
-      input.focus();
       input.addEventListener('keydown', e => { if (e.key === 'Enter') createSpace(); });
       input.addEventListener('input', () => {
         updateOnboardingActionState();
         if (input.value.trim()) emitLinkorEvent('space-name-entered', { name: input.value.trim() });
       });
+      if (!isOnboardingActive()) input.focus();
     }
-  }, 100);
+  }, 80);
 }
 
 function selectEmoji(e, el) {
@@ -1950,16 +2028,33 @@ function selectSpaceColor(c, el) {
 
 function selectSpaceTemplate(templateId, el) {
   if (!SPACE_TEMPLATES[templateId]) return;
+
+  if (isOnboardingActive()) {
+    if (templateId !== 'blank') {
+      newSpaceTemplate = 'blank';
+      document.querySelectorAll('.template-card').forEach(card => card.classList.remove('active'));
+      document.querySelector('.template-card[onclick*="blank"]')?.classList.add('active');
+      showToast('Шаблони будуть доступні після екскурсу. Зараз створюємо порожній простір.');
+      return;
+    }
+
+    newSpaceTemplate = 'blank';
+    document.querySelectorAll('.template-card').forEach(card => card.classList.remove('active'));
+    el.classList.add('active');
+    return;
+  }
+
   newSpaceTemplate = templateId;
   document.querySelectorAll('.template-card').forEach(card => card.classList.remove('active'));
   el.classList.add('active');
   emitLinkorEvent('space-template-selected', { templateId });
-  if (isOnboardingActive() && templateId !== 'blank') {
-    showToast('Для туру найпростіше почати з порожнього простору.');
-  }
 }
 
 function createSpace() {
+  if (isOnboardingActive() && getOnboardingSelector(getOnboardingStep()) !== '[data-tour="create-space-submit"]') {
+    renderOnboardingStep();
+    return;
+  }
   const name = document.getElementById('new-space-name')?.value.trim();
   if (!name) { showToast(`⚠ ${tr('enterName')}`); return; }
   if (!canUsePlanResource('spaces', state.spaces.length + 1)) {
@@ -1980,7 +2075,8 @@ function createSpace() {
   state.spaces.unshift(space);
   createTemplateContent(space.id, newSpaceTemplate);
   saveState();
-  closeModal();
+  closeModal({ force: true });
+  clearOnboardingAllowedTargets();
   showToast(`✓ ${tr('spaceCreated')}: ${name}`);
   renderHub();
   emitLinkorEvent('space-created', { id: space.id, spaceId: space.id, name: space.name });
@@ -2014,13 +2110,26 @@ function createTemplateContent(spaceId, templateId) {
 }
 
 function handleModalClick(e) {
+  if (isOnboardingActive() && isOnboardingModalStep()) {
+    e.preventDefault();
+    e.stopPropagation();
+    renderOnboardingStep();
+    return;
+  }
   if (e.currentTarget === e.target) {
     closeModal();
   }
 }
-function closeModal() {
-  document.querySelector('.modal-box')?.classList.remove('modal-box-wide');
+function closeModal(options = {}) {
+  if (!options.force && isOnboardingActive() && isOnboardingModalStep()) {
+    requestAnimationFrame(() => renderOnboardingStep());
+    return;
+  }
+  document.querySelector('.modal-box')?.classList.remove('modal-box-wide', 'modal-box-hotkeys');
   document.querySelector('.modal-box')?.removeAttribute('data-tour');
+  document.querySelectorAll('#modal .onboarding-modal-active, #modal .onboarding-allowed-target, #modal .onboarding-locked-disabled, #modal .onboarding-active-target').forEach(el => {
+    el.classList.remove('onboarding-modal-active', 'onboarding-allowed-target', 'onboarding-locked-disabled', 'onboarding-active-target');
+  });
   document.getElementById('modal').style.display = 'none';
 }
 
@@ -2377,9 +2486,12 @@ function renderEdges() {
     
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', d);
-    path.setAttribute('class', 'edge-path');
+    path.setAttribute('class', 'edge-path' + (state.selectedEdgeId === edge.id ? ' selected' : ''));
     path.setAttribute('data-edge', edge.id);
-    path.addEventListener('click', () => {
+    path.addEventListener('click', (event) => {
+      event.stopPropagation();
+      selectEdge(edge.id);
+      return;
       if (confirm(tr('deleteLinkConfirm'))) {
         captureHistory(tr('delete'));
         delete state.edges[edge.id];
@@ -2390,6 +2502,26 @@ function renderEdges() {
     });
     svg.appendChild(path);
   });
+}
+
+function selectEdge(edgeId) {
+  const nextEdgeId = state.edges[edgeId] ? edgeId : null;
+  if (nextEdgeId) selectNode(null);
+  state.selectedEdgeId = nextEdgeId;
+  document.querySelectorAll('.edge-path').forEach(path => {
+    path.classList.toggle('selected', path.dataset.edge === state.selectedEdgeId);
+  });
+}
+
+function deleteSelectedEdge() {
+  if (!state.selectedEdgeId || !state.edges[state.selectedEdgeId]) return false;
+  captureHistory(tr('delete'));
+  delete state.edges[state.selectedEdgeId];
+  state.selectedEdgeId = null;
+  saveState();
+  renderCanvas();
+  showToast(`вњ“ ${tr('delete')}`);
+  return true;
 }
 
 // ===== DRAG & PAN =====
@@ -2423,6 +2555,12 @@ function onNodeMouseDown(e, nodeId) {
   if (e.target.classList.contains('node-anchor')) return;
 // Simple click-to-connect disabled: onboarding must teach real handle drag.
   e.stopPropagation();
+  if (spacePanning || e.button === 1 || e.button === 2) {
+    e.preventDefault();
+    state.panning = true;
+    state.panStart = { x: e.clientX - state.view.x, y: e.clientY - state.view.y };
+    return;
+  }
   if (state.tool === 'cut') return;
   if (state.tool === 'connect') {
     if (state.connectSource) cancelConnect();
@@ -2472,17 +2610,63 @@ function applyView() {
   if (onboarding.active) requestAnimationFrame(() => positionOnboardingCard(getOnboardingTarget(ONBOARDING_STEPS[onboarding.stepIndex])));
 }
 
-function zoom(factor, cx, cy) {
+function clampZoom(scale) {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
+}
+
+function getCanvasCenterPoint() {
   const wrap = document.getElementById('canvas-wrap');
-  if (!wrap) return;
+  if (!wrap) return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
   const rect = wrap.getBoundingClientRect();
-  const mx = (cx ?? rect.width/2) - rect.left;
-  const my = (cy ?? rect.height/2) - rect.top;
-  const newScale = Math.min(3, Math.max(0.2, state.view.scale * factor));
-  state.view.x = mx - (mx - state.view.x) * (newScale / state.view.scale);
-  state.view.y = my - (my - state.view.y) * (newScale / state.view.scale);
-  state.view.scale = newScale;
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+}
+
+function panCanvasBy(dx, dy) {
+  state.view.x += dx;
+  state.view.y += dy;
   applyView();
+}
+
+function getCanvasLocalPoint(clientX, clientY) {
+  const wrap = document.getElementById('canvas-wrap');
+  if (!wrap) return null;
+  const rect = wrap.getBoundingClientRect();
+  return {
+    x: clientX - rect.left,
+    y: clientY - rect.top
+  };
+}
+
+function screenToWorld(clientX, clientY, view = state.view) {
+  const point = getCanvasLocalPoint(clientX, clientY);
+  if (!point) return null;
+  const scale = view.scale || 1;
+  return {
+    x: (point.x - view.x) / scale,
+    y: (point.y - view.y) / scale
+  };
+}
+
+function zoom(factor, cx, cy) {
+  const center = getCanvasCenterPoint();
+  const clientX = cx ?? center.x;
+  const clientY = cy ?? center.y;
+  const cursor = getCanvasLocalPoint(clientX, clientY);
+  if (!cursor) return;
+  const oldScale = state.view.scale || 1;
+  const newScale = clampZoom(oldScale * factor);
+  if (newScale === oldScale) return;
+  const worldBeforeZoom = screenToWorld(clientX, clientY, state.view);
+  if (!worldBeforeZoom) return;
+  state.view.scale = newScale;
+  state.view.x = cursor.x - worldBeforeZoom.x * newScale;
+  state.view.y = cursor.y - worldBeforeZoom.y * newScale;
+  applyView();
+}
+
+function smoothZoomFromWheel(e) {
+  const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SPEED);
+  zoom(factor, e.clientX, e.clientY);
 }
 
 function fitView() {
@@ -2499,7 +2683,7 @@ function fitView() {
   const h = maxY - minY;
   const scaleX = (rect.width - 80) / w;
   const scaleY = (rect.height - 80) / h;
-  const scale = Math.min(1.5, Math.max(0.3, Math.min(scaleX, scaleY)));
+  const scale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(1.5, scaleX, scaleY)));
   state.view.scale = scale;
   state.view.x = (rect.width - w * scale) / 2 - minX * scale;
   state.view.y = (rect.height - h * scale) / 2 - minY * scale;
@@ -2585,6 +2769,11 @@ function getQuickCapturePosition(index, total) {
 }
 
 function quickCapture() {
+  if (isOnboardingActive()) {
+    showToast('Thinking-блоки будуть доступні після завершення екскурсу.');
+    return;
+  }
+
   const input = document.getElementById('quick-capture-input');
   if (!input) return;
   const items = input.value
@@ -2672,7 +2861,7 @@ function focusSelectedNode() {
   const wrap = document.getElementById('canvas-wrap');
   if (!wrap) return;
   const rect = wrap.getBoundingClientRect();
-  state.view.scale = Math.max(0.8, Math.min(1.4, state.view.scale));
+  state.view.scale = clampZoom(Math.max(0.8, Math.min(1.4, state.view.scale)));
   state.view.x = rect.width / 2 - (node.x + 80) * state.view.scale;
   state.view.y = rect.height / 2 - (node.y + 40) * state.view.scale;
   applyView();
@@ -2713,6 +2902,7 @@ function deleteNode(e, nodeId) {
 
 function deleteSelected() {
   const ids = getSelectedNodeIds();
+  if (!ids.length && deleteSelectedEdge()) return;
   if (!ids.length) return;
   captureHistory(tr('delete'));
   ids.forEach(nodeId => {
@@ -2724,6 +2914,7 @@ function deleteSelected() {
   });
   state.selectedNodeId = null;
   state.selectedNodeIds = [];
+  state.selectedEdgeId = null;
   closeNodeEditor();
   saveState();
   renderCanvas();
@@ -2792,6 +2983,7 @@ function selectNode(id, additive = false) {
   if (!id) {
     state.selectedNodeId = null;
     state.selectedNodeIds = [];
+    state.selectedEdgeId = null;
   } else if (additive) {
     const set = new Set(getSelectedNodeIds());
     if (set.has(id)) set.delete(id);
@@ -2802,6 +2994,7 @@ function selectNode(id, additive = false) {
     state.selectedNodeId = id;
     state.selectedNodeIds = [id];
   }
+  if (id) state.selectedEdgeId = null;
   document.querySelectorAll('.node').forEach(n => n.classList.remove('selected'));
   getSelectedNodeIds().forEach(selectedId => document.getElementById('node-' + selectedId)?.classList.add('selected'));
   if (state.selectedNodeId) {
@@ -2906,7 +3099,17 @@ function finishConnect(toId, targetAnchor = DEFAULT_EDGE_TARGET_ANCHOR) {
 
 function finishConnectFromEvent(e) {
   const target = getConnectionTargetFromEvent(e);
-  if (!target) { cancelConnect(); return; }
+
+  if (!target) {
+    if (isOnboardingActive() && onboarding.waitingFor === 'edge-created' && onboarding.connectionSource) {
+      state.connectSource = { ...onboarding.connectionSource };
+      showToast('Спробуй ще раз: затисни точку і доведи лінію до другої точки');
+      return;
+    }
+    cancelConnect();
+    return;
+  }
+
   finishConnect(target.nodeId, target.anchor);
 }
 
@@ -3226,6 +3429,125 @@ function connectSuggested(fromId, toId) {
   }
 }
 
+function parseTagList(value) {
+  return String(value || '')
+    .split(',')
+    .map(tag => tag.trim())
+    .filter(Boolean);
+}
+
+function dedupeTags(tags) {
+  const seen = new Set();
+  const result = [];
+  tags.forEach(tag => {
+    const key = tag.toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    result.push(tag);
+  });
+  return result;
+}
+
+function normalizeTagInput(value) {
+  return dedupeTags(parseTagList(value)).join(', ');
+}
+
+function getCurrentSpaceExistingTags(excludeNodeId = null) {
+  return dedupeTags(
+    Object.values(state.nodes)
+      .filter(node => {
+        if (!node || !node.tags) return false;
+        if (excludeNodeId && node.id === excludeNodeId) return false;
+        if (state.currentSpaceId && node.spaceId) {
+          return node.spaceId === state.currentSpaceId;
+        }
+        return false;
+      })
+      .flatMap(node => parseTagList(node.tags))
+  ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+function getCurrentTagDraft(input) {
+  const value = input?.value || '';
+  const lastComma = value.lastIndexOf(',');
+  return value.slice(lastComma + 1).trim();
+}
+
+function getCommittedEditorTags(input) {
+  const value = input?.value || '';
+  const lastComma = value.lastIndexOf(',');
+  if (lastComma === -1) return [];
+  return parseTagList(value.slice(0, lastComma));
+}
+
+function setEditorTags(tags) {
+  const input = document.getElementById('editor-tags');
+  if (!input) return;
+  input.value = dedupeTags(tags).join(', ');
+  renderTagSuggestions();
+}
+
+function commitEditorTag(tag = null) {
+  const input = document.getElementById('editor-tags');
+  if (!input) return;
+  const draft = String(tag ?? getCurrentTagDraft(input)).trim();
+  const currentDraft = getCurrentTagDraft(input).toLowerCase();
+  const replacesDraft = tag && currentDraft && String(tag).toLowerCase().includes(currentDraft);
+  const tags = tag && !replacesDraft ? parseTagList(input.value) : getCommittedEditorTags(input);
+  if (draft) tags.push(draft);
+  setEditorTags(tags);
+}
+
+function addTagSuggestion(tag) {
+  commitEditorTag(tag);
+  document.getElementById('editor-tags')?.focus();
+}
+
+function hideTagSuggestions() {
+  const box = document.getElementById('tag-suggestions');
+  if (!box) return;
+  box.innerHTML = '';
+  box.classList.remove('visible');
+}
+
+function renderTagSuggestions() {
+  const input = document.getElementById('editor-tags');
+  const box = document.getElementById('tag-suggestions');
+  if (!input || !box || document.activeElement !== input) return;
+  const existingTags = getCurrentSpaceExistingTags(state.selectedNodeId);
+  const currentTags = new Set(parseTagList(input.value).map(tag => tag.toLowerCase()));
+  const draft = getCurrentTagDraft(input).toLowerCase();
+  const suggestions = existingTags
+    .filter(tag => !currentTags.has(tag.toLowerCase()))
+    .filter(tag => !draft || tag.toLowerCase().includes(draft))
+    .slice(0, 8);
+
+  if (!suggestions.length) {
+    hideTagSuggestions();
+    return;
+  }
+
+  box.innerHTML = suggestions
+    .map(tag => `<button type="button" class="tag-suggestion" onmousedown="event.preventDefault()" onclick="addTagSuggestion(decodeURIComponent('${encodeURIComponent(tag)}'))">${escHtml(tag)}</button>`)
+    .join('');
+  box.classList.add('visible');
+}
+
+function setupTagsAutocomplete() {
+  const input = document.getElementById('editor-tags');
+  if (!input || input.dataset.autocompleteReady === 'true') return;
+  input.dataset.autocompleteReady = 'true';
+  input.addEventListener('focus', renderTagSuggestions);
+  input.addEventListener('input', renderTagSuggestions);
+  input.addEventListener('blur', () => setTimeout(hideTagSuggestions, 120));
+  input.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ',') return;
+    event.preventDefault();
+    event.stopPropagation();
+    commitEditorTag();
+  });
+}
+
 // ===== NODE EDITOR =====
 function closeRightPanels(exceptId = null) {
   ['ai-panel', 'node-editor'].forEach(id => {
@@ -3240,6 +3562,8 @@ function editNode(e, nodeId) {
   document.getElementById('editor-title').value = node.title;
   document.getElementById('editor-desc').value = node.desc || '';
   document.getElementById('editor-tags').value = node.tags || '';
+  setupTagsAutocomplete();
+  renderTagSuggestions();
   const typeSelect = document.getElementById('editor-type');
   if (typeSelect) {
     typeSelect.innerHTML = Object.entries(NODE_TYPES)
@@ -3287,7 +3611,7 @@ function saveNodeEdit() {
   captureHistory(tr('edit'));
   node.title = document.getElementById('editor-title')?.value || tr('title');
   node.desc = document.getElementById('editor-desc')?.value || '';
-  node.tags = document.getElementById('editor-tags')?.value || '';
+  node.tags = normalizeTagInput(document.getElementById('editor-tags')?.value || '');
   node.type = document.getElementById('editor-type')?.value || 'idea';
   const activeColor = document.querySelector('.color-swatch.active');
   if (activeColor) node.colorIdx = parseInt(activeColor.dataset.idx);
@@ -3331,6 +3655,7 @@ function saveNodeEdit() {
 
 function closeNodeEditor() {
   document.getElementById('node-editor')?.classList.remove('open');
+  hideTagSuggestions();
 }
 
 // ===== AUTO LAYOUT =====
@@ -3830,11 +4155,27 @@ function isElectronRuntime() {
   return Boolean(window.nodusBridge?.runtime?.isElectron);
 }
 
-function setAIMessage(message, kind = 'info') {
+function addAIMessage(message, kind = 'info') {
   const responseEl = document.getElementById('ai-response-content');
   if (!responseEl) return;
-  const color = kind === 'error' ? 'var(--accent2)' : (kind === 'warn' ? '#ffd166' : 'var(--text-dim)');
-  responseEl.innerHTML = `<p style="color:${color};font-size:12px;line-height:1.5;">${escHtml(message)}</p>`;
+
+  const msg = document.createElement('div');
+  msg.className = `ai-chat-message ${kind}`;
+  msg.textContent = message;
+
+  responseEl.appendChild(msg);
+  responseEl.scrollTop = responseEl.scrollHeight;
+}
+
+function resetAIChat(message = 'AI-помічник у розробці. Зараз я створюю структури через заготовки: студентські задачі, бізнес, контент, справи, покупки та навчання.') {
+  const responseEl = document.getElementById('ai-response-content');
+  if (!responseEl) return;
+  responseEl.innerHTML = '';
+  addAIMessage(message, 'info');
+}
+
+function setAIMessage(message, kind = 'info') {
+  addAIMessage(message, kind);
 }
 
 function loadExternalScript(src) {
@@ -3896,18 +4237,28 @@ function extractJSON(text) {
 function buildNodeGenerationPrompt(userPrompt) {
   const lang = currentLang();
   const typeList = Object.keys(NODE_TYPES).join(', ');
+
   return `
-You are the AI brain inside ${BRAND_NAME}, a visual thinking app.
+You are the AI assistant inside ${BRAND_NAME}, a visual mindmap app.
 User language: ${lang}. Reply only in that language.
-Create a practical knowledge graph for this user goal:
+
+User idea:
 "${userPrompt}"
 
-Return ONLY valid JSON, no markdown.
+Create a clear, useful mindmap structure.
+
+Return ONLY valid JSON. No markdown, no explanations.
+
 Schema:
 {
-  "summary": "short useful summary",
+  "summary": "short summary of the generated structure",
   "nodes": [
-    { "title": "short node title", "desc": "concrete action or reasoning", "type": "idea|task|question|resource|decision", "tags": "comma separated tags" }
+    {
+      "title": "short clear title",
+      "desc": "useful explanation, next step, risk, question or action",
+      "type": "idea|task|question|resource|decision",
+      "tags": "comma separated tags"
+    }
   ],
   "links": [
     { "from": 0, "to": 1, "reason": "why these nodes connect" }
@@ -3915,11 +4266,14 @@ Schema:
 }
 
 Rules:
-- Make 5 to 9 nodes.
+- Create 4 to 7 nodes.
 - Types must be one of: ${typeList}.
-- Make the graph actionable, not generic.
-- If user says they want to buy a car, include steps like budget, brand/model choice, market listings analysis, inspection, test drive, documents, negotiation, risks.
-- Links must connect nodes that overlap by meaning, cause, sequence, or shared decision context.
+- Be practical and specific.
+- Avoid generic empty advice.
+- If the idea is a business, include: audience, offer, costs, risks, first steps.
+- If the idea is learning, include: topics, schedule, weak points, practice, resources.
+- If unsure, create useful questions and next actions.
+- Links should connect only meaningful related nodes.
 `.trim();
 }
 
@@ -4023,70 +4377,127 @@ async function getAISemanticLinks(nodes) {
 }
 
 async function generateGraphPlan(prompt) {
-  try {
-    const raw = await askRealAI(buildNodeGenerationPrompt(prompt));
-    const parsed = extractJSON(raw);
-    const normalized = normalizeAINodes(parsed, prompt);
-    if (normalized.nodes.length) return { ...normalized, source: 'ai' };
-  } catch (err) {
-    console.warn('Real AI generation failed, using local fallback:', err);
-    setAIMessage(`AI generation unavailable: ${err.message}. Using local generation fallback.`, 'warn');
+  const selectedPreset = document.getElementById('ai-preset-select')?.value || 'auto';
+  const nodes = getPromptBlueprint(prompt, selectedPreset);
+  const links = buildPresetLinks(nodes);
+
+  return {
+    summary: 'Структура створена через заготовку Linkor. Повноцінний AI-помічник зараз у розробці.',
+    nodes,
+    links,
+    source: 'preset'
+  };
+}
+function buildPresetLinks(nodes) {
+  if (!Array.isArray(nodes) || nodes.length < 2) return [];
+
+  const links = [];
+
+  for (let i = 1; i < nodes.length; i++) {
+    links.push({ from: 0, to: i, reason: 'Пов’язано з основною ідеєю' });
   }
-  return { summary: prompt, nodes: getPromptBlueprint(prompt), links: [], source: 'fallback' };
+
+  if (nodes.length >= 5) {
+    links.push({ from: 1, to: 3, reason: 'Уточнює наступні дії' });
+    links.push({ from: 2, to: 4, reason: 'Пов’язано з ризиками або ресурсами' });
+  }
+
+  return links;
+}
+function getPromptBlueprint(prompt, preset = 'auto') {
+  const text = String(prompt || '').toLowerCase();
+  const selected = preset === 'auto' ? detectPromptPreset(text) : preset;
+
+  const blueprints = {
+    student_exam: [
+      { title: 'Ціль іспиту', desc: 'Який результат потрібен і до якої дати треба підготуватись?', type: 'decision', tags: 'навчання, ціль' },
+      { title: 'Список тем', desc: 'Розбий предмет на теми: сильні, середні та слабкі місця.', type: 'resource', tags: 'теми' },
+      { title: 'Слабкі місця', desc: 'Що дається найважче і потребує повторення першим?', type: 'question', tags: 'проблеми' },
+      { title: 'Графік підготовки', desc: 'Склади план на тиждень: теорія, практика, повторення.', type: 'task', tags: 'план' },
+      { title: 'Практика тестів', desc: 'Регулярно проходь тести і фіксуй помилки.', type: 'task', tags: 'тести' },
+      { title: 'Контроль прогресу', desc: 'Раз на тиждень перевіряй результат і коригуй план.', type: 'task', tags: 'контроль' }
+    ],
+
+    student_coursework: [
+      { title: 'Тема роботи', desc: 'Сформулюй тему, питання дослідження і очікуваний результат.', type: 'idea', tags: 'курсова, тема' },
+      { title: 'Структура', desc: 'Вступ, розділи, практична частина, висновки, джерела.', type: 'resource', tags: 'структура' },
+      { title: 'Джерела', desc: 'Зібрати статті, книги, статистику або офіційні документи.', type: 'resource', tags: 'джерела' },
+      { title: 'План написання', desc: 'Розбити роботу на маленькі дедлайни.', type: 'task', tags: 'дедлайн' },
+      { title: 'Ризики', desc: 'Що може затримати роботу: джерела, викладач, оформлення, дедлайни.', type: 'question', tags: 'ризики' },
+      { title: 'Фінальна перевірка', desc: 'Перевірити оформлення, логіку, унікальність і список літератури.', type: 'task', tags: 'перевірка' }
+    ],
+
+    startup: [
+      { title: 'Проблема', desc: 'Який біль або потребу вирішує ідея?', type: 'question', tags: 'проблема' },
+      { title: 'Цільовий клієнт', desc: 'Хто саме має цю проблему і готовий за рішення платити?', type: 'idea', tags: 'клієнт' },
+      { title: 'Рішення', desc: 'Який мінімальний продукт можна зробити першим?', type: 'decision', tags: 'продукт' },
+      { title: 'MVP', desc: 'Найменша версія, яку можна показати людям за 1–2 тижні.', type: 'task', tags: 'mvp' },
+      { title: 'Канали', desc: 'Де знайти перших користувачів: Telegram, TikTok, Instagram, спільноти, холодні повідомлення.', type: 'resource', tags: 'маркетинг' },
+      { title: 'Монетизація', desc: 'Як продукт заробляє: підписка, разовий платіж, комісія, послуга.', type: 'decision', tags: 'гроші' },
+      { title: 'Ризики', desc: 'Що може не спрацювати і як це швидко перевірити?', type: 'question', tags: 'ризики' }
+    ],
+
+    cafe: [
+      { title: 'Концепція кавʼярні', desc: 'Формат: to-go, посадка, specialty, студентська, преміальна або сімейна.', type: 'idea', tags: 'кавʼярня, концепція' },
+      { title: 'Цільова аудиторія', desc: 'Хто буде купувати: студенти, офісні працівники, місцеві, туристи.', type: 'idea', tags: 'аудиторія' },
+      { title: 'Локація', desc: 'Прохідність, конкуренти поруч, оренда, видимість, транспорт.', type: 'decision', tags: 'локація' },
+      { title: 'Меню і ціни', desc: 'Основні напої, снеки, середній чек і маржинальність.', type: 'resource', tags: 'меню, ціни' },
+      { title: 'Стартові витрати', desc: 'Оренда, ремонт, кавомашина, меблі, посуд, зарплати, реклама.', type: 'question', tags: 'витрати' },
+      { title: 'Запуск', desc: 'Що зробити за перші 30 днів: ремонт, постачальники, соцмережі, тестовий день.', type: 'task', tags: 'запуск' },
+      { title: 'Ризики', desc: 'Мала прохідність, висока оренда, слабкий сервіс, конкуренти, сезонність.', type: 'question', tags: 'ризики' }
+    ],
+
+    content: [
+      { title: 'Мета контенту', desc: 'Для чого контент: продажі, довіра, охоплення, експертність або комʼюніті.', type: 'decision', tags: 'контент, ціль' },
+      { title: 'Аудиторія', desc: 'Для кого пишемо і які питання їх реально хвилюють?', type: 'idea', tags: 'аудиторія' },
+      { title: 'Рубрики', desc: 'Освітній контент, кейси, закулісся, продажі, особисте, відгуки.', type: 'resource', tags: 'рубрики' },
+      { title: 'Контент на 7 днів', desc: 'Розпиши теми постів або відео на тиждень.', type: 'task', tags: 'план' },
+      { title: 'Формати', desc: 'Reels, каруселі, сторіс, короткі пости, довгі розбори.', type: 'resource', tags: 'формати' },
+      { title: 'Метрики', desc: 'Що дивитись: збереження, коментарі, заявки, переходи, продажі.', type: 'task', tags: 'аналітика' }
+    ],
+
+    daily: [
+      { title: 'Головна задача дня', desc: 'Що сьогодні найбільше просуне тебе вперед?', type: 'decision', tags: 'день, фокус' },
+      { title: 'Термінові справи', desc: 'Що має дедлайн або наслідки, якщо не зробити?', type: 'task', tags: 'терміново' },
+      { title: 'Побут', desc: 'Дрібні справи: покупки, прибирання, дзвінки, документи.', type: 'task', tags: 'побут' },
+      { title: 'Навчання / робота', desc: 'Що треба зробити для навчання, роботи або проєкту?', type: 'task', tags: 'робота' },
+      { title: 'Відпочинок', desc: 'Що допоможе не вигоріти і відновити енергію?', type: 'idea', tags: 'відпочинок' },
+      { title: 'Підсумок дня', desc: 'Увечері перевірити: що зроблено, що перенести, що покращити.', type: 'task', tags: 'рефлексія' }
+    ],
+
+    purchase: [
+      { title: 'Потреба', desc: 'Навіщо потрібна покупка і яку проблему вона вирішує?', type: 'question', tags: 'покупка' },
+      { title: 'Критерії вибору', desc: 'Ціна, якість, гарантія, характеристики, відгуки, сервіс.', type: 'decision', tags: 'критерії' },
+      { title: 'Варіанти', desc: 'Зібрати 3–5 варіантів для порівняння.', type: 'resource', tags: 'варіанти' },
+      { title: 'Плюси і мінуси', desc: 'Що сильне і слабке у кожному варіанті?', type: 'question', tags: 'аналіз' },
+      { title: 'Ризики', desc: 'Переплата, погана якість, відсутність гарантії, непотрібна функція.', type: 'question', tags: 'ризики' },
+      { title: 'Фінальне рішення', desc: 'Який варіант найкраще закриває потребу за свої гроші?', type: 'decision', tags: 'рішення' }
+    ],
+
+    learning: [
+      { title: 'Навичка', desc: 'Що саме хочеш вивчити і для чого це потрібно?', type: 'idea', tags: 'навчання' },
+      { title: 'Рівень зараз', desc: 'Що вже знаєш і де найбільші прогалини?', type: 'question', tags: 'рівень' },
+      { title: 'План на 30 днів', desc: 'Розбий навчання на тижні: база, практика, проєкт, повторення.', type: 'task', tags: 'план' },
+      { title: 'Практика', desc: 'Які вправи або мініпроєкти допоможуть закріпити знання?', type: 'task', tags: 'практика' },
+      { title: 'Ресурси', desc: 'Курси, книги, відео, статті, ментор або спільнота.', type: 'resource', tags: 'ресурси' },
+      { title: 'Перевірка прогресу', desc: 'Як зрозуміти, що ти реально просунувся?', type: 'question', tags: 'контроль' }
+    ]
+  };
+
+  return blueprints[selected] || blueprints.startup;
 }
 
-function getPromptBlueprint(prompt) {
-  const text = prompt.toLowerCase();
-  const isUkrainian = currentLang() === 'uk';
-  const isRussian = currentLang() === 'ru';
-  const carBuying = /(машин|авто|автомоб|car|vehicle|купити|купить|buy)/i.test(prompt) && /(купити|купить|buy|покуп)/i.test(prompt);
-  const clothing = /(одяг|одежд|clothing|fashion|бренд|brand|hoodie|футбол|streetwear)/i.test(prompt);
-  const startup = /(startup|стартап|бізнес|бизнес|product|продукт|запуст|launch|магазин)/i.test(prompt);
-  if (carBuying) return getCarBuyingBlueprint(prompt);
-  if (clothing) {
-    if (isUkrainian) return [
-      { title: 'ЦА', desc: 'Для кого бренд одягу: стиль, вік, бюджет, ситуації покупки.', type: 'idea', tags: 'аудиторія, бренд' },
-      { title: 'Продукт', desc: 'Перші речі в лінійці: базові моделі, матеріали, розміри, ціна.', type: 'decision', tags: 'одяг, продукт' },
-      { title: 'Позиціонування', desc: 'Чим бренд відрізняється: стиль, історія, цінність, візуальна мова.', type: 'idea', tags: 'бренд, позиціонування' },
-      { title: 'Канали продажу', desc: 'Instagram, TikTok, сайт, маркетплейси, попапи або локальні магазини.', type: 'resource', tags: 'продажі, канали' },
-      { title: 'Виробництво', desc: 'Постачальники, мінімальні партії, контроль якості, пакування.', type: 'task', tags: 'виробництво' },
-      { title: 'Ризики', desc: 'Перевиробництво, слабкий попит, касовий розрив, затримки постачання.', type: 'question', tags: 'ризики' }
-    ];
-    if (isRussian) return [
-      { title: 'ЦА', desc: 'Для кого бренд одежды: стиль, возраст, бюджет, ситуации покупки.', type: 'idea', tags: 'аудитория, бренд' },
-      { title: 'Продукт', desc: 'Первые вещи в линейке: базовые модели, материалы, размеры, цена.', type: 'decision', tags: 'одежда, продукт' },
-      { title: 'Позиционирование', desc: 'Чем бренд отличается: стиль, история, ценность, визуальный язык.', type: 'idea', tags: 'бренд, позиционирование' },
-      { title: 'Каналы продаж', desc: 'Instagram, TikTok, сайт, маркетплейсы, попапы или локальные магазины.', type: 'resource', tags: 'продажи, каналы' },
-      { title: 'Производство', desc: 'Поставщики, минимальные партии, контроль качества, упаковка.', type: 'task', tags: 'производство' },
-      { title: 'Риски', desc: 'Перепроизводство, слабый спрос, кассовый разрыв, задержки поставок.', type: 'question', tags: 'риски' }
-    ];
-    return [
-      { title: 'Target audience', desc: 'Who buys the clothing brand: style, budget, identity and purchase moments.', type: 'idea', tags: 'audience, brand' },
-      { title: 'Product line', desc: 'First pieces: core garments, materials, sizing and target price.', type: 'decision', tags: 'clothing, product' },
-      { title: 'Positioning', desc: 'What makes the brand distinct: style, story, value and visual language.', type: 'idea', tags: 'brand, positioning' },
-      { title: 'Sales channels', desc: 'Instagram, TikTok, website, marketplaces, popups or local stores.', type: 'resource', tags: 'sales, channels' },
-      { title: 'Production', desc: 'Suppliers, minimum orders, quality control and packaging.', type: 'task', tags: 'production' },
-      { title: 'Risks', desc: 'Overproduction, weak demand, cash gaps and supply delays.', type: 'question', tags: 'risks' }
-    ];
-  }
-  if (startup) {
-    return [
-      { title: isUkrainian ? 'Клієнт' : isRussian ? 'Клиент' : 'Customer', desc: prompt, type: 'idea', tags: isUkrainian ? 'клієнт, ідея' : isRussian ? 'клиент, идея' : 'customer, idea' },
-      { title: isUkrainian ? 'Проблема' : isRussian ? 'Проблема' : 'Problem', desc: isUkrainian ? 'Який біль або потребу треба вирішити?' : isRussian ? 'Какую боль или потребность нужно решить?' : 'What pain or need should be solved?', type: 'question', tags: isUkrainian ? 'проблема' : isRussian ? 'проблема' : 'problem' },
-      { title: isUkrainian ? 'Продукт' : isRussian ? 'Продукт' : 'Product', desc: isUkrainian ? 'Яке рішення можна зібрати першим?' : isRussian ? 'Какое решение можно собрать первым?' : 'What solution can be built first?', type: 'decision', tags: isUkrainian ? 'продукт' : isRussian ? 'продукт' : 'product' },
-      { title: isUkrainian ? 'Перевірка' : isRussian ? 'Проверка' : 'Validation', desc: isUkrainian ? 'Найменший тест попиту.' : isRussian ? 'Самый маленький тест спроса.' : 'The smallest demand test.', type: 'task', tags: 'mvp, test' },
-      { title: isUkrainian ? 'Канали' : isRussian ? 'Каналы' : 'Channels', desc: isUkrainian ? 'Де знайти перших користувачів або покупців?' : isRussian ? 'Где найти первых пользователей или покупателей?' : 'Where to find first users or buyers?', type: 'resource', tags: isUkrainian ? 'канали' : isRussian ? 'каналы' : 'channels' }
-    ];
-  }
-  const parts = prompt.split(/[.\n;]+/).map(p => p.trim()).filter(Boolean).slice(0, 7);
-  const base = parts.length > 1 ? parts : prompt.split(/,\s+|\s+і\s+|\s+и\s+|\s+and\s+/i).map(p => p.trim()).filter(p => p.length > 3).slice(0, 7);
-  const seed = base.length ? base : [prompt];
-  return seed.map((part, index) => ({
-    title: part.length > 46 ? part.slice(0, 43) + '...' : part,
-    desc: index === 0 ? prompt : part,
-    type: index % 4 === 1 ? 'question' : index % 4 === 2 ? 'task' : 'idea',
-    tags: isUkrainian ? 'думка' : isRussian ? 'мысль' : 'thought'
-  }));
+function detectPromptPreset(text) {
+  if (/(нмт|іспит|екзамен|зно|тест|математика|українська|історія|англійська)/i.test(text)) return 'student_exam';
+  if (/(курсова|реферат|диплом|проєкт|проект|університет|універ)/i.test(text)) return 'student_coursework';
+  if (/(кавʼяр|кав'яр|кафе|coffee|coffe|ресторан|бар)/i.test(text)) return 'cafe';
+  if (/(контент|тікток|tiktok|instagram|інстаграм|пости|reels|соцмереж)/i.test(text)) return 'content';
+  if (/(день|справи|план дня|todo|задачі|побут)/i.test(text)) return 'daily';
+  if (/(купити|покупка|вибрати|ноутбук|телефон|машин|авто|варіант)/i.test(text)) return 'purchase';
+  if (/(вивчити|навчитись|курс|навичка|skill|learn)/i.test(text)) return 'learning';
+  if (/(стартап|бізнес|бизнес|продукт|магазин|запуск|mvp|startup)/i.test(text)) return 'startup';
+
+  return 'startup';
 }
 
 function layoutGeneratedNodes(count) {
@@ -4102,65 +4513,185 @@ function layoutGeneratedNodes(count) {
 }
 
 async function generateNodesFromPrompt(prompt) {
-  if (!prompt.trim()) { showToast(tr('thinkEmpty')); return []; }
-  const responseEl = document.getElementById('ai-response-content');
-  if (responseEl) responseEl.innerHTML = `<div class="ai-loading">${tr('aiLoading')}</div>`;
-  let plan;
-  try {
-    plan = await generateGraphPlan(prompt);
-  } catch (err) {
-    setAIMessage(`AI failed: ${err.message}`, 'error');
-    showToast('AI failed');
+  const cleanPrompt = String(prompt || '').trim();
+
+  if (cleanPrompt.length < 8) {
+    setAIMessage('Опиши ідею трохи конкретніше. Наприклад: “Хочу відкрити кав’ярню біля університету”.', 'warn');
+    showToast('Опиши ідею трохи конкретніше');
     return [];
   }
+
+  let plan;
+
+  try {
+    setAIMessage('Аналізую ідею та будую структуру...', 'info');
+    plan = await generateGraphPlan(cleanPrompt);
+  } catch (err) {
+    setAIMessage(`Не вдалося згенерувати: ${err.message}`, 'error');
+    showToast('AI не зміг згенерувати вузли');
+    return [];
+  }
+
+  if (!plan?.nodes?.length) {
+    setAIMessage('Не вдалося отримати вузли. Спробуй описати ідею конкретніше.', 'error');
+    return [];
+  }
+
   if (!canUsePlanResource('nodes', getHubMetrics().totalNodes + plan.nodes.length)) {
     showPlanLimit('nodes');
     return [];
   }
+
   captureHistory(tr('think'));
+
   const positions = layoutGeneratedNodes(plan.nodes.length);
+
   const ids = plan.nodes.map((item, index) => {
     const pos = positions[index];
-    const id = createNode(pos.x, pos.y, item.title, item.desc, index % NODE_COLORS.length, item.type || 'idea', {
-      skipHistory: true,
-      skipSave: true,
-      silent: true
-    });
+
+    const id = createNode(
+      pos.x,
+      pos.y,
+      item.title,
+      item.desc,
+      index % NODE_COLORS.length,
+      item.type || 'idea',
+      {
+        skipHistory: true,
+        skipSave: true,
+        silent: true
+      }
+    );
+
     if (id) state.nodes[id].tags = item.tags || '';
     return id;
   }).filter(Boolean);
+
   const linked = new Set();
-  plan.links.forEach(link => {
+
+  (plan.links || []).forEach(link => {
     const from = ids[link.from];
     const to = ids[link.to];
-    if (from && to && createEdgeDirect(from, to, { silentLimit: true })) linked.add(`${from}|${to}`);
+
+    if (from && to && createEdgeDirect(from, to, { silentLimit: true })) {
+      linked.add(`${from}|${to}`);
+    }
   });
+
   if (!linked.size && ids.length > 1) {
-    for (let i = 1; i < ids.length; i++) createEdgeDirect(ids[0], ids[i], { silentLimit: true });
-    for (let i = 1; i < ids.length - 1; i++) {
-      const a = state.nodes[ids[i]];
-      const b = state.nodes[ids[i + 1]];
-      const shared = tokenizeNode(a).some(token => tokenizeNode(b).includes(token));
-      if (shared || i % 2 === 1) createEdgeDirect(ids[i], ids[i + 1], { silentLimit: true });
+    for (let i = 1; i < ids.length; i++) {
+      createEdgeDirect(ids[0], ids[i], { silentLimit: true });
     }
   }
+
   saveState();
   renderCanvas();
+
   if (ids[0]) selectNode(ids[0]);
-  fitView();
-  if (responseEl) {
-    responseEl.innerHTML = `
-      <p><strong>${tr('aiSummary')}</strong></p>
-      <p>${escHtml(plan.summary || prompt)}</p>
-      <p>${plan.source === 'ai' ? 'Secure AI' : 'Local fallback'} · ${tr('generatedNodes')}: ${ids.length}</p>
-      ${plan.source === 'fallback' ? '<p style="color:var(--text-dim);font-size:12px;">External AI unavailable. Local assistant generated a practical graph.</p>' : ''}
-    `;
+
+  // ВАЖЛИВО: не робимо fitView(), бо він різко смикає canvas.
+  setAIMessage(`Готово. Створено вузлів: ${ids.length}.`, 'success');
+
+  if (plan.summary) {
+    setAIMessage(plan.summary, 'info');
   }
-  showToast(`✓ ${tr('generatedNodes')}: ${ids.length}`);
+
+  if (plan.source === 'preset') {
+  setAIMessage('Зараз використовується заготовка Linkor. Повноцінний AI-помічник буде доданий в наступних версіях.', 'warn');
+}
+
+  showToast(`✓ Створено вузлів: ${ids.length}`);
   return ids;
+}
+function setAIGenerateButtonsLoading(isLoading) {
+  const buttons = [
+    document.getElementById('quick-ai-generate-btn'),
+    document.getElementById('ai-generate-btn')
+  ].filter(Boolean);
+
+  buttons.forEach(btn => {
+    btn.disabled = isLoading;
+    btn.classList.toggle('ai-generating', isLoading);
+  });
+
+  clearInterval(aiThinkingInterval);
+  aiThinkingInterval = null;
+
+  if (!isLoading) {
+    buttons.forEach(btn => {
+      const span = btn.querySelector('span');
+      if (span) span.textContent = '🧠 Згенерувати вузли';
+      else btn.textContent = '🧠 Згенерувати вузли';
+    });
+    return;
+  }
+
+  let dots = 0;
+  aiThinkingInterval = setInterval(() => {
+    dots = (dots % 3) + 1;
+    const label = `Генерую${'.'.repeat(dots)}`;
+
+    buttons.forEach(btn => {
+      const span = btn.querySelector('span');
+      if (span) span.textContent = label;
+      else btn.textContent = label;
+    });
+  }, 420);
+}
+
+async function handleAIGenerate(source = 'panel') {
+  if (aiThinkingInProgress) return;
+
+  if (isOnboardingActive()) {
+    showToast('AI буде доступний після завершення екскурсу.');
+    return;
+  }
+
+  const quickInput = document.getElementById('quick-capture-input');
+  const panelInput = document.getElementById('ai-prompt-input');
+
+  const sourceInput = source === 'quick' ? quickInput : panelInput;
+  const fallbackInput = source === 'quick' ? panelInput : quickInput;
+
+  const prompt = (sourceInput?.value || fallbackInput?.value || '').trim();
+
+ if (prompt.length < 8) {
+  openThinkingMode();
+  resetAIChat('Опиши ідею трохи конкретніше або вибери заготовку: студент, стартап, кавʼярня, контент, справи, покупка чи навчання.');
+  sourceInput?.focus();
+  return;
+}
+
+  aiThinkingInProgress = true;
+  setAIGenerateButtonsLoading(true);
+  openThinkingMode();
+  resetAIChat('Думаю над структурою...');
+  setAIMessage('Генерую вузли для твоєї ідеї...', 'info');
+
+  try {
+    if (panelInput && !panelInput.value.trim()) panelInput.value = prompt;
+
+    const ids = await generateNodesFromPrompt(prompt);
+
+    if (ids.length && source === 'quick' && quickInput) {
+      quickInput.value = '';
+    }
+  } catch (err) {
+    console.error('[ai] generation failed:', err);
+    setAIMessage('Не вдалося згенерувати. Спробуй ще раз або опиши ідею конкретніше.', 'error');
+  } finally {
+    aiThinkingInProgress = false;
+    setAIGenerateButtonsLoading(false);
+  }
 }
 
 function openThinkingMode() {
+  if (isOnboardingActive()) {
+    closeRightPanels();
+    showToast('Thinking буде доступний після завершення екскурсу.');
+    return;
+  }
+
   closeRightPanels('ai-panel');
   const panel = document.getElementById('ai-panel');
   if (panel && !panel.classList.contains('open')) panel.classList.add('open');
@@ -4172,23 +4703,15 @@ function openThinkingMode() {
 }
 
 async function runThinkingModeFromAI() {
-  await generateNodesFromPrompt(getAIPromptText());
-  renderAISummary();
+  await handleAIGenerate('panel');
 }
 
 async function runThinkingModeFromQuick() {
-  const quick = document.getElementById('quick-capture-input');
-  const prompt = quick?.value.trim() || '';
-  if (!prompt) { showToast(tr('thinkEmpty')); quick?.focus(); return; }
-  const input = document.getElementById('ai-prompt-input');
-  if (input) input.value = prompt;
-  openThinkingMode();
-  await generateNodesFromPrompt(prompt);
-  if (quick) quick.value = '';
+  await handleAIGenerate('quick');
 }
 
 async function aiGenerateNodes() {
-  await generateNodesFromPrompt(getAIPromptText());
+  await handleAIGenerate('panel');
 }
 
 function getSpaceSummary() {
@@ -4235,6 +4758,12 @@ function renderAISummary() {
 
 // ===== AI PANEL =====
 function toggleAIPanel() {
+  if (isOnboardingActive()) {
+    closeRightPanels();
+    showToast('AI помічник буде доступний після завершення екскурсу.');
+    return;
+  }
+
   const panel = document.getElementById('ai-panel');
   if (!panel) return;
 
@@ -4242,12 +4771,13 @@ function toggleAIPanel() {
   if (willOpen) closeRightPanels('ai-panel');
 
   panel.classList.toggle('open');
-  if (panel.classList.contains('open')) {
-    generateAIResponse();
-    if (isElectronRuntime()) {
-      setAIMessage('Secure AI mode: renderer has no API keys. Configure AI_BACKEND_ENDPOINT for real AI, local assistant fallback remains available.', 'info');
-    }
-  }
+if (panel.classList.contains('open')) {
+  resetAIChat('Напиши ідею і натисни “Згенерувати вузли”.');
+  const input = document.getElementById('ai-prompt-input');
+  const quick = document.getElementById('quick-capture-input');
+  if (input && quick?.value.trim() && !input.value.trim()) input.value = quick.value.trim();
+  input?.focus();
+}
 }
 
 function closeAIPanel() {
@@ -4366,6 +4896,110 @@ function runFirstCommand() {
   }
 }
 
+function showHotkeysHelp() {
+  const modal = document.getElementById('modal');
+  if (!modal) return;
+
+  const modalBox = modal.querySelector('.modal-box');
+  modalBox?.classList.remove('modal-box-wide');
+  modalBox?.classList.add('modal-box-hotkeys');
+
+  document.getElementById('modal-title').textContent = '// Гарячі клавіші';
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="hotkeys-help">
+      <section class="hotkeys-section">
+        <h4>Навігація</h4>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><kbd>Space</kbd><span>+</span><span>drag</span></div>
+          <div class="hotkey-desc">Рухати поле</div>
+        </div>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><span>Колесо мишки</span></div>
+          <div class="hotkey-desc">Зум до курсора</div>
+        </div>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><kbd>Ctrl</kbd><span>+</span><span>wheel</span></div>
+          <div class="hotkey-desc">Зум до курсора / pinch</div>
+        </div>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><kbd>Shift</kbd><span>+</span><span>wheel</span></div>
+          <div class="hotkey-desc">Горизонтальний рух</div>
+        </div>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><span>Стрілки</span></div>
+          <div class="hotkey-desc">Рухати поле</div>
+        </div>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><kbd>Ctrl</kbd><span>+</span><kbd>0</kbd></div>
+          <div class="hotkey-desc">Скинути вигляд</div>
+        </div>
+      </section>
+
+      <section class="hotkeys-section">
+        <h4>Вузли</h4>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><kbd>N</kbd></div>
+          <div class="hotkey-desc">Режим додавання вузла</div>
+        </div>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><kbd>Enter</kbd></div>
+          <div class="hotkey-desc">Редагувати вибраний вузол</div>
+        </div>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><kbd>Delete</kbd><span>/</span><kbd>Backspace</kbd></div>
+          <div class="hotkey-desc">Видалити вибране</div>
+        </div>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><kbd>Esc</kbd></div>
+          <div class="hotkey-desc">Вийти з режиму / закрити панелі</div>
+        </div>
+      </section>
+
+      <section class="hotkeys-section">
+        <h4>Редагування</h4>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><kbd>Ctrl</kbd><span>+</span><kbd>S</kbd></div>
+          <div class="hotkey-desc">Зберегти / синхронізувати</div>
+        </div>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><kbd>Ctrl</kbd><span>+</span><kbd>D</kbd></div>
+          <div class="hotkey-desc">Дублювати вузол</div>
+        </div>
+      </section>
+
+      <section class="hotkeys-section">
+        <h4>Пошук</h4>
+
+        <div class="hotkey-row">
+          <div class="hotkey-combo"><kbd>Ctrl</kbd><span>+</span><kbd>F</kbd></div>
+          <div class="hotkey-desc">Фокус на пошук вузлів</div>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-actions">
+      <button class="modal-btn modal-btn-primary" onclick="closeModal()">
+        <span>OK</span>
+      </button>
+    </div>
+  `;
+
+  modal.style.display = 'flex';
+}
+
 // ===== UTILS =====
 function escHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -4401,6 +5035,7 @@ let onboarding = {
   createdSpaceId: null,
   pendingCanvasRect: null,
   connectionSource: null,
+  connectionDragActive: false,
   simpleConnectSourceId: null,
   targetTimer: null,
   targetStartedAt: 0,
@@ -4412,20 +5047,17 @@ let onboarding = {
 const ONBOARDING_STEPS = [
   { target: '.hub-new-btn[data-tour="create-space"]', title: 'Створимо простір', text: 'Створимо твій перший простір. Натисни кнопку створення простору.', continueText: '👉 Для продовження: натисни кнопку', waitFor: 'space-create-modal-opened' },
   { target: '[data-tour="space-title"]', title: 'Назва простору', text: 'Введи назву простору. Наприклад: Навчання, Робота або Ідеї.', continueText: '👉 Для продовження: введи назву простору', waitFor: 'space-name-entered' },
-  { target: '[data-tour="templates"]', title: 'Шаблони', text: 'Тут можна обрати готовий шаблон. Шаблони допомагають швидше почати.', continueText: '👉 Для продовження: обери шаблон або натисни "Далі"' },
+{ target: '[data-tour="templates"]', title: 'Шаблони', text: 'Тут будуть готові шаблони. В екскурсі ми створимо порожній простір, щоб усе було простіше.', continueText: '👉 Для продовження: натисни "Далі"' },
   { target: '[data-tour="space-color"]', title: 'Колір', text: 'Тут можна вибрати колір простору, щоб швидше знаходити його в списку.', continueText: '👉 Для продовження: обери колір або натисни "Далі"' },
   { target: '[data-tour="create-space-submit"]', title: 'Створити', text: 'Готово. Натисни "Створити", щоб додати простір.', continueText: '👉 Для продовження: натисни "Створити"', waitFor: 'space-created' },
   { target: () => getOnboardingSpaceCardSelector(), title: 'Твій простір', text: 'Ось твій новий простір. Натисни на нього, щоб відкрити.', continueText: '👉 Для продовження: натисни на створений простір', waitFor: 'space-card-opened' },
   { target: '[data-tour="graph-canvas"]', title: 'Робоче поле', text: 'Це робоче поле. Тут будуть твої блоки з ідеями, задачами або нотатками.', continueText: '👉 Для продовження: натисни "Далі"', onEnter: () => ensureOnboardingGraphMode() },
   { target: '.engine-sidebar', title: 'Ліва панель', text: 'Зліва знаходяться інструменти. Тут можна додавати блоки, зв’язки та редагувати простір.', continueText: '👉 Для продовження: натисни "Далі"' },
-  { target: '[data-tour="add-node"]', title: 'Додати блок', text: 'Ця кнопка вмикає режим створення нового блоку.', continueText: '👉 Для продовження: натисни цю кнопку', waitFor: 'create-node-mode-enabled', onEnter: () => ensureOnboardingGraphMode() },
-  { target: () => getOnboardingCanvasTargetSelector(), title: 'Порожнє місце', text: 'Натисни на порожнє місце на полі — там з’явиться новий блок.', continueText: '👉 Для продовження: натисни на підсвічену область', waitFor: 'first-node-created' },
+{ target: '[data-tour="add-node"]', title: 'Додати блок', text: 'Ця кнопка вмикає режим створення нового блоку.', continueText: '👉 Для продовження: натисни цю кнопку', waitFor: 'create-node-mode-enabled', onEnter: () => { ensureOnboardingGraphMode(); closeRightPanels(); } },  { target: () => getOnboardingCanvasTargetSelector(), title: 'Порожнє місце', text: 'Натисни на порожнє місце на полі — там з’явиться новий блок.', continueText: '👉 Для продовження: натисни на підсвічену область', waitFor: 'first-node-created' },
   { target: () => onboarding.firstNodeId ? `#node-${onboarding.firstNodeId}` : '.node', title: 'Це блок', text: 'Це блок. У ньому можна зберігати думку, задачу або ідею.', continueText: '👉 Для продовження: натисни "Далі"' },
-  { target: '[data-tour="add-node"]', title: 'Другий блок', text: 'Додамо ще один блок, щоб показати зв’язок між ідеями.', continueText: '👉 Для продовження: натисни кнопку додавання блоку', waitFor: 'create-node-mode-enabled', onEnter: () => ensureOnboardingGraphMode() },
-  { target: () => getOnboardingCanvasTargetSelector(), title: 'Ще одне місце', text: 'Натисни на інше порожнє місце — там з’явиться другий блок.', continueText: '👉 Для продовження: натисни на підсвічену область', waitFor: 'second-node-created' },
- { target: () => getOnboardingAnchorSelector(onboarding.firstNodeId, 'right'), title: 'Початок зв’язку', text: 'Затисни підсвічену точку на правому краї блоку і потягни лінію до другого блоку.', continueText: '👉 Для продовження: затисни точку і почни тягнути лінію', waitFor: 'connection-started', connectionStep: true },
-{ target: () => getOnboardingAnchorSelector(onboarding.secondNodeId, 'left'), title: 'Завершення зв’язку', text: 'Дотягни лінію до підсвіченої точки на другому блоці та відпусти.', continueText: '👉 Для продовження: відпусти лінію на цій точці', waitFor: 'edge-created', connectionStep: true },
-  { target: () => onboarding.lastEdgeId ? `.edge-path[data-edge="${onboarding.lastEdgeId}"]` : '.edge-path', title: 'Готово', text: 'Готово. Так працює зв’язок між блоками.', continueText: '👉 Для продовження: натисни "Завершити"', final: true }
+{ target: '[data-tour="add-node"]', title: 'Додати блок', text: 'Ця кнопка вмикає режим створення нового блоку.', continueText: '👉 Для продовження: натисни цю кнопку', waitFor: 'create-node-mode-enabled', onEnter: () => { ensureOnboardingGraphMode(); closeRightPanels(); } },  { target: () => getOnboardingCanvasTargetSelector(), title: 'Ще одне місце', text: 'Натисни на інше порожнє місце — там з’явиться другий блок.', continueText: '👉 Для продовження: натисни на підсвічену область', waitFor: 'second-node-created' },
+{ target: () => getOnboardingAnchorSelector(onboarding.firstNodeId, 'right'), title: 'Початок зв’язку', text: 'Затисни підсвічену точку і, не відпускаючи, веди лінію до другого блоку.', continueText: '👉 Для продовження: не відпускай мишу, тягни лінію до другої підсвіченої точки.', waitFor: 'connection-started', connectionStep: true },
+{ target: () => getOnboardingAnchorSelector(onboarding.secondNodeId, 'left'), title: 'Відпусти тут', text: 'Відпусти лінію на підсвіченій точці.', continueText: 'Відпусти тут', waitFor: 'edge-created', connectionStep: true, compactConnectionHint: true },  { target: () => onboarding.lastEdgeId ? `.edge-path[data-edge="${onboarding.lastEdgeId}"]` : '.edge-path', title: 'Готово', text: 'Готово. Ти створив зв’язок між блоками.', continueText: '👉 Для продовження: натисни "Завершити".', final: true }
 ];
 
 function isOnboardingActive() {
@@ -4452,8 +5084,153 @@ function startOnboardingSimpleConnect() {
   onboarding.simpleConnectSourceId = null;
 }
 
+function getOnboardingStep() {
+  return ONBOARDING_STEPS[onboarding.stepIndex] || ONBOARDING_STEPS[0];
+}
+
+function isOnboardingModalStep(step = getOnboardingStep()) {
+  const selector = getOnboardingSelector(step);
+  return ['[data-tour="space-title"]', '[data-tour="templates"]', '[data-tour="space-color"]', '[data-tour="create-space-submit"]'].includes(selector);
+}
+
+function getOnboardingBlockers() {
+  document.getElementById('onboarding-blocker')?.remove();
+  return ['top', 'left', 'right', 'bottom'].map(side => {
+    let blocker = document.getElementById(`onboarding-blocker-${side}`);
+    if (!blocker) {
+      blocker = document.createElement('div');
+      blocker.id = `onboarding-blocker-${side}`;
+      blocker.className = `onboarding-blocker onboarding-blocker-${side}`;
+      ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach(type => {
+        blocker.addEventListener(type, event => {
+          event.preventDefault();
+          event.stopPropagation();
+        });
+      });
+      document.body.appendChild(blocker);
+    }
+    return blocker;
+  });
+}
+
+function setOnboardingBlockerRect(blocker, left, top, width, height) {
+  blocker.style.display = width > 0 && height > 0 ? 'block' : 'none';
+  blocker.style.left = `${Math.max(0, left)}px`;
+  blocker.style.top = `${Math.max(0, top)}px`;
+  blocker.style.width = `${Math.max(0, width)}px`;
+  blocker.style.height = `${Math.max(0, height)}px`;
+}
+
+function updateOnboardingMask(target = null) {
+  const [topBlocker, leftBlocker, rightBlocker, bottomBlocker] = getOnboardingBlockers();
+  if (!isOnboardingActive()) {
+    [topBlocker, leftBlocker, rightBlocker, bottomBlocker].forEach(blocker => blocker.style.display = 'none');
+    return;
+  }
+  if (onboarding.connectionDragActive) {
+    [topBlocker, leftBlocker, rightBlocker, bottomBlocker].forEach(blocker => blocker.style.display = 'none');
+    return;
+  }
+  if (!target) {
+    setOnboardingBlockerRect(topBlocker, 0, 0, window.innerWidth, window.innerHeight);
+    [leftBlocker, rightBlocker, bottomBlocker].forEach(blocker => blocker.style.display = 'none');
+    return;
+  }
+  const rect = target.getBoundingClientRect();
+  const pad = 10;
+  const hole = {
+    left: Math.max(0, rect.left - pad),
+    top: Math.max(0, rect.top - pad),
+    right: Math.min(window.innerWidth, rect.right + pad),
+    bottom: Math.min(window.innerHeight, rect.bottom + pad)
+  };
+  setOnboardingBlockerRect(topBlocker, 0, 0, window.innerWidth, hole.top);
+  setOnboardingBlockerRect(leftBlocker, 0, hole.top, hole.left, hole.bottom - hole.top);
+  setOnboardingBlockerRect(rightBlocker, hole.right, hole.top, window.innerWidth - hole.right, hole.bottom - hole.top);
+  setOnboardingBlockerRect(bottomBlocker, 0, hole.bottom, window.innerWidth, window.innerHeight - hole.bottom);
+}
+
+function enableOnboardingLock(target = null) {
+  document.body.classList.add('onboarding-locked');
+  updateOnboardingAllowedTarget(target);
+  updateOnboardingMask(target);
+}
+
+function disableOnboardingLock() {
+  document.body.classList.remove('onboarding-locked');
+  document.getElementById('onboarding-blocker')?.remove();
+  ['top', 'left', 'right', 'bottom'].forEach(side => document.getElementById(`onboarding-blocker-${side}`)?.remove());
+  clearOnboardingAllowedTargets();
+}
+
+function clearOnboardingAllowedTargets() {
+  document.querySelectorAll('.onboarding-allowed-target').forEach(el => el.classList.remove('onboarding-allowed-target'));
+  document.querySelectorAll('.onboarding-locked-disabled').forEach(el => el.classList.remove('onboarding-locked-disabled'));
+  document.querySelectorAll('.onboarding-modal-active').forEach(el => el.classList.remove('onboarding-modal-active'));
+}
+
+function updateOnboardingAllowedTarget(target) {
+  clearOnboardingAllowedTargets();
+  if (!isOnboardingActive()) return;
+  document.getElementById('onboarding-card')?.classList.add('onboarding-allowed-target');
+  document.getElementById('onboarding-welcome')?.classList.add('onboarding-allowed-target');
+  if (!target) return;
+  target.classList.add('onboarding-allowed-target');
+  target.querySelectorAll?.('button, input, textarea, select, [onclick], [role="button"], .node-anchor').forEach(el => {
+    el.classList.add('onboarding-allowed-target');
+  });
+  const modal = target.closest?.('#modal');
+  if (modal) {
+    modal.classList.add('onboarding-modal-active');
+    modal.querySelector('.modal-box')?.classList.add('onboarding-modal-active');
+    modal.querySelectorAll('button, input, textarea, select, [onclick], [role="button"], .template-card, .modal-tone').forEach(el => {
+      const allowed = el === target || target.contains(el) || el.contains(target);
+      el.classList.toggle('onboarding-locked-disabled', !allowed);
+    });
+  }
+}
+
+function ensureOnboardingModalForStep(step) {
+  if (!isOnboardingModalStep(step)) return;
+  const modal = document.getElementById('modal');
+  const modalOpen = modal?.style.display === 'flex';
+  const modalBox = modal?.querySelector('.modal-box[data-tour="space-create-modal"]');
+  if (!modalOpen || !modalBox) openNewSpaceModal();
+}
+
+function getOnboardingConnectionHint() {
+  let hint = document.getElementById('onboarding-connection-hint');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.id = 'onboarding-connection-hint';
+    hint.className = 'onboarding-connection-hint';
+    hint.textContent = 'Відпусти тут';
+    document.body.appendChild(hint);
+  }
+  return hint;
+}
+
+function hideOnboardingConnectionHint() {
+  document.getElementById('onboarding-connection-hint')?.classList.remove('visible');
+}
+
+function updateOnboardingConnectionHint(target, step) {
+  const hint = getOnboardingConnectionHint();
+  if (!onboarding.connectionDragActive || !step?.compactConnectionHint || !target) {
+    hint.classList.remove('visible');
+    return;
+  }
+  const rect = target.getBoundingClientRect();
+  const left = Math.max(12, Math.min(window.innerWidth - 132, rect.right + 12));
+  const top = Math.max(12, Math.min(window.innerHeight - 36, rect.top + rect.height / 2 - 16));
+  hint.style.left = `${left}px`;
+  hint.style.top = `${top}px`;
+  hint.classList.add('visible');
+}
+
 function ensureOnboardingDom() {
   if (document.getElementById('onboarding-overlay')) return;
+  getOnboardingBlockers();
   const overlay = document.createElement('div');
   overlay.id = 'onboarding-overlay';
   overlay.className = 'onboarding-overlay';
@@ -4475,7 +5252,6 @@ function ensureOnboardingDom() {
       <div class="onboarding-text" id="onboarding-text"></div>
       <div class="onboarding-wait" id="onboarding-wait"></div>
       <div class="onboarding-actions">
-        <button onclick="prevOnboardingStep()" id="onboarding-back">Назад</button>
         <button onclick="skipOnboardingTour()" class="ghost">Пропустити</button>
         <button onclick="nextOnboardingStep()" id="onboarding-next">Далі</button>
       </div>
@@ -4509,27 +5285,45 @@ function findOnboardingFreeCanvasRect(wrapRect, markerWidth, markerHeight) {
   const nodeRects = [...document.querySelectorAll('.node')]
     .map(node => node.getBoundingClientRect())
     .filter(rect => rect.width > 0 && rect.height > 0);
-  const candidates = [
-    [0.50, 0.50], [0.68, 0.58], [0.38, 0.62], [0.72, 0.36],
-    [0.42, 0.34], [0.58, 0.72], [0.28, 0.48], [0.78, 0.68],
-    [0.50, 0.28], [0.30, 0.74], [0.74, 0.24], [0.22, 0.26]
+
+  const uiRects = [
+    ...[...document.querySelectorAll('#ai-panel.open, #node-editor.open, .onboarding-card, .onboarding-welcome')]
+      .map(el => el.getBoundingClientRect())
+      .filter(rect => rect.width > 0 && rect.height > 0),
+    {
+      left: wrapRect.left,
+      top: wrapRect.top,
+      right: Math.min(wrapRect.left + 280, wrapRect.right),
+      bottom: wrapRect.bottom
+    }
   ];
+
+  const blockedRects = [...nodeRects, ...uiRects];
+
+  const candidates = [
+    [0.50, 0.50], [0.64, 0.45], [0.36, 0.45], [0.50, 0.68],
+    [0.72, 0.34], [0.30, 0.34], [0.68, 0.70], [0.34, 0.72],
+    [0.52, 0.28], [0.78, 0.58], [0.24, 0.58], [0.58, 0.82]
+  ];
+
   for (const [rx, ry] of candidates) {
     const left = wrapRect.left + wrapRect.width * rx - markerWidth / 2;
     const top = wrapRect.top + wrapRect.height * ry - markerHeight / 2;
     const rect = {
-      left: Math.max(wrapRect.left + 16, Math.min(wrapRect.right - markerWidth - 16, left)),
-      top: Math.max(wrapRect.top + 16, Math.min(wrapRect.bottom - markerHeight - 16, top))
+      left: Math.max(wrapRect.left + 24, Math.min(wrapRect.right - markerWidth - 24, left)),
+      top: Math.max(wrapRect.top + 24, Math.min(wrapRect.bottom - markerHeight - 24, top))
     };
     rect.right = rect.left + markerWidth;
     rect.bottom = rect.top + markerHeight;
-    if (!nodeRects.some(nodeRect => rectsOverlap(rect, nodeRect, 28))) return rect;
+
+    if (!blockedRects.some(blocked => rectsOverlap(rect, blocked, 42))) return rect;
   }
+
   return {
-    left: Math.max(wrapRect.left + 16, wrapRect.right - markerWidth - 24),
-    top: Math.max(wrapRect.top + 16, wrapRect.bottom - markerHeight - 24),
-    right: wrapRect.right - 24,
-    bottom: wrapRect.bottom - 24
+    left: Math.max(wrapRect.left + 320, Math.min(wrapRect.right - markerWidth - 32, wrapRect.left + wrapRect.width * 0.58)),
+    top: Math.max(wrapRect.top + 80, Math.min(wrapRect.bottom - markerHeight - 32, wrapRect.top + wrapRect.height * 0.58)),
+    right: wrapRect.right - 32,
+    bottom: wrapRect.bottom - 32
   };
 }
 
@@ -4544,39 +5338,37 @@ function getOnboardingCanvasTargetSelector() {
       if (isOnboardingActive() && state.tool === 'node') {
         event.preventDefault();
         event.stopPropagation();
-        addNodeAt(event);
+       addNodeAt({
+  clientX: onboarding.pendingCanvasRect.left + onboarding.pendingCanvasRect.width / 2,
+  clientY: onboarding.pendingCanvasRect.top + onboarding.pendingCanvasRect.height / 2,
+  preventDefault() {},
+  stopPropagation() {}
+});
       }
     });
     document.body.appendChild(marker);
   }
-  if (!wrap) return '#onboarding-canvas-target';
-  const rect = wrap.getBoundingClientRect();
-  const width = Math.min(220, Math.max(150, rect.width * 0.18));
-  const height = Math.min(140, Math.max(96, rect.height * 0.18));
-  let freeRect = null;
-  if (onboarding.createdNodeIds.length >= 1 && onboarding.firstNodeId && state.nodes[onboarding.firstNodeId]) {
-    const first = state.nodes[onboarding.firstNodeId];
-    const desired = viewportPointFromWorld({
-      x: first.x + NODE_FALLBACK_SIZE.width / 2 + 280,
-      y: first.y + NODE_FALLBACK_SIZE.height / 2 + 120
-    });
-    const candidate = {
-      left: Math.max(rect.left + 16, Math.min(rect.right - width - 16, rect.left + desired.x - width / 2)),
-      top: Math.max(rect.top + 16, Math.min(rect.bottom - height - 16, rect.top + desired.y - height / 2))
-    };
-    candidate.right = candidate.left + width;
-    candidate.bottom = candidate.top + height;
-    if (![...document.querySelectorAll('.node')].some(node => rectsOverlap(candidate, node.getBoundingClientRect(), 30))) {
-      freeRect = candidate;
-    }
-  }
-  if (!freeRect) freeRect = findOnboardingFreeCanvasRect(rect, width, height);
-  marker.style.left = `${freeRect.left}px`;
-  marker.style.top = `${freeRect.top}px`;
-  marker.style.width = `${width}px`;
-  marker.style.height = `${height}px`;
-  onboarding.pendingCanvasRect = { left: freeRect.left, top: freeRect.top, width, height };
-  return '#onboarding-canvas-target';
+ if (!wrap) return '#onboarding-canvas-target';
+
+const rect = wrap.getBoundingClientRect();
+const width = Math.min(220, Math.max(150, rect.width * 0.18));
+const height = Math.min(140, Math.max(96, rect.height * 0.18));
+
+const freeRect = findOnboardingFreeCanvasRect(rect, width, height);
+
+marker.style.left = `${freeRect.left}px`;
+marker.style.top = `${freeRect.top}px`;
+marker.style.width = `${width}px`;
+marker.style.height = `${height}px`;
+
+onboarding.pendingCanvasRect = {
+  left: freeRect.left,
+  top: freeRect.top,
+  width,
+  height
+};
+
+return '#onboarding-canvas-target';
 }
 
 function applyOnboardingNodePosition(node) {
@@ -4660,17 +5452,7 @@ function getOnboardingProxy() {
 
 function updateOnboardingProxy(target, step) {
   const proxy = getOnboardingProxy();
-  if (!target || !step?.connectionStep || !['connection-started', 'edge-created'].includes(step?.waitFor)) {
-    proxy.style.display = 'none';
-    return;
-  }
-  const rect = target.getBoundingClientRect();
-  const size = Math.max(72, Math.max(rect.width, rect.height) + 34);
-  proxy.style.display = '';
-  proxy.style.left = `${rect.left + rect.width / 2 - size / 2}px`;
-  proxy.style.top = `${rect.top + rect.height / 2 - size / 2}px`;
-  proxy.style.width = `${size}px`;
-  proxy.style.height = `${size}px`;
+  proxy.style.display = 'none';
 }
 
 function positionOnboardingCard(target) {
@@ -4683,6 +5465,7 @@ function positionOnboardingCard(target) {
     card.style.left = '50%';
     card.style.top = '50%';
     card.style.transform = 'translate(-50%, -50%)';
+    enableOnboardingLock(null);
     return;
   }
   const rect = target.getBoundingClientRect();
@@ -4738,6 +5521,36 @@ function positionOnboardingCard(target) {
   card.style.left = `${left}px`;
   card.style.top = `${top}px`;
   card.style.transform = 'none';
+  const step = getOnboardingStep();
+if (step?.connectionStep) {
+  disableOnboardingLock();
+} else {
+  enableOnboardingLock(target);
+}
+}
+
+function refreshOnboardingLayout() {
+  if (!onboarding.active) return;
+  const step = getOnboardingStep();
+  const target = getOnboardingTarget(step);
+  if (!target) {
+    updateOnboardingMask(null);
+    hideOnboardingConnectionHint();
+    return;
+  }
+  positionOnboardingCard(target);
+  updateOnboardingProxy(target, step);
+  updateOnboardingConnectionHint(target, step);
+}
+
+function focusOnboardingTarget(target, retry = true) {
+  if (!target?.matches?.('input, textarea')) return;
+  target.focus({ preventScroll: true });
+  const valueLength = target.value?.length || 0;
+  target.setSelectionRange?.(valueLength, valueLength);
+  if (retry && document.activeElement !== target) {
+    setTimeout(() => focusOnboardingTarget(target, false), 80);
+  }
 }
 
 function renderOnboardingWelcome() {
@@ -4745,6 +5558,7 @@ function renderOnboardingWelcome() {
   const overlay = document.getElementById('onboarding-overlay');
   overlay?.classList.add('active', 'welcome-mode');
   overlay?.classList.remove('tour-mode');
+  enableOnboardingLock(null);
   document.getElementById('onboarding-card').style.display = 'none';
   document.getElementById('onboarding-spotlight').style.display = 'none';
   const welcome = document.getElementById('onboarding-welcome');
@@ -4769,7 +5583,8 @@ welcome.style.transform = 'translate(-50%, -50%)';
 function renderOnboardingStep() {
   if (!onboarding.active) return;
   ensureOnboardingDom();
-  const step = ONBOARDING_STEPS[onboarding.stepIndex] || ONBOARDING_STEPS[0];
+  const step = getOnboardingStep();
+  ensureOnboardingModalForStep(step);
   document.body.classList.toggle('onboarding-connection-mode', Boolean(step.connectionStep));
   document.body.classList.toggle('onboarding-simple-connect-mode', Boolean(step.simpleConnectStep));
   if (step.onEnter && onboarding.enteredStepIndex !== onboarding.stepIndex) {
@@ -4786,12 +5601,12 @@ function renderOnboardingStep() {
   overlay?.classList.add('active', 'tour-mode');
   overlay?.classList.remove('welcome-mode');
   document.getElementById('onboarding-welcome').style.display = 'none';
-  card.style.display = 'block';
+  const compactConnection = Boolean(step.compactConnectionHint && onboarding.connectionDragActive);
+  card.style.display = compactConnection ? 'none' : 'block';
   card.classList.remove('visible');
   document.getElementById('onboarding-progress').textContent = `Крок ${onboarding.stepIndex + 1} з ${ONBOARDING_STEPS.length}`;
   document.getElementById('onboarding-title').textContent = step.title || '';
   document.getElementById('onboarding-text').textContent = step.text;
-  document.getElementById('onboarding-back').disabled = onboarding.stepIndex === 0;
   const next = document.getElementById('onboarding-next');
   const wait = document.getElementById('onboarding-wait');
   next.textContent = step.final ? 'Завершити' : (step.waitFor ? 'Далі' : 'Далі');
@@ -4799,18 +5614,13 @@ function renderOnboardingStep() {
   wait.textContent = step.continueText || (step.waitFor ? '👉 Для продовження: виконай дію' : '👉 Для продовження: натисни "Далі"');
   onboarding.waitingFor = step.waitFor || null;
   updateOnboardingActionState();
-  positionOnboardingCard(target);
-  updateOnboardingProxy(target, step);
-  requestAnimationFrame(() => {
-    positionOnboardingCard(getOnboardingTarget(step));
-    card.classList.add('visible');
-  });
-  requestAnimationFrame(() => updateOnboardingProxy(getOnboardingTarget(step), step));
-  setTimeout(() => {
-    const freshTarget = getOnboardingTarget(step);
-    positionOnboardingCard(freshTarget);
-    updateOnboardingProxy(freshTarget, step);
-  }, 50);
+  const freshTarget = getOnboardingTarget(step);
+if (!onboarding.connectionDragActive) {
+  positionOnboardingCard(freshTarget);
+}
+updateOnboardingProxy(freshTarget, step);
+updateOnboardingConnectionHint(freshTarget, step);  focusOnboardingTarget(freshTarget);
+  if (!compactConnection) card.classList.add('visible');
   localStorage.setItem(ONBOARDING_STEP_KEY, String(onboarding.stepIndex));
   renderOutdatedBanner();
 }
@@ -4824,7 +5634,7 @@ function updateOnboardingActionState() {
   if (step.waitFor === 'space-name-entered') {
     const hasName = Boolean(document.getElementById('new-space-name')?.value.trim());
     next.disabled = !hasName;
-    if (wait) wait.textContent = hasName ? '👉 Для продовження: натисни "Створити"' : '👉 Для продовження: введи назву';
+    if (wait) wait.textContent = hasName ? '👉 Для продовження: натисни "Далі"' : '👉 Для продовження: введи назву';
     return;
   }
   next.disabled = Boolean(step.waitFor);
@@ -4833,7 +5643,8 @@ function updateOnboardingActionState() {
 function waitForOnboardingTarget(step) {
   clearTimeout(onboarding.targetTimer);
   onboarding.targetTimer = null;
-  document.getElementById('onboarding-overlay')?.classList.remove('active');
+  document.getElementById('onboarding-overlay')?.classList.add('active');
+  enableOnboardingLock(null);
   const selector = getOnboardingSelector(step);
   if (!selector || onboarding.targetTimer) return;
   waitForTarget(selector, 5000).then(target => {
@@ -4849,6 +5660,7 @@ function waitForOnboardingTarget(step) {
 }
 
 function renderOnboardingMissingTarget(step) {
+  ensureOnboardingDom();
   const overlay = document.getElementById('onboarding-overlay');
   overlay?.classList.add('active', 'tour-mode');
   overlay?.classList.remove('welcome-mode');
@@ -4858,7 +5670,6 @@ function renderOnboardingMissingTarget(step) {
   document.getElementById('onboarding-progress').textContent = `Крок ${onboarding.stepIndex + 1} з ${ONBOARDING_STEPS.length}`;
   document.getElementById('onboarding-title').textContent = step.title || 'Потрібне місце не знайдено';
   document.getElementById('onboarding-text').textContent = 'Я не бачу потрібну кнопку або блок. Закрий зайві вікна або повернись на потрібний екран.';
-  document.getElementById('onboarding-back').disabled = onboarding.stepIndex === 0;
   const next = document.getElementById('onboarding-next');
   const wait = document.getElementById('onboarding-wait');
   next.textContent = step.final ? 'Завершити' : 'Далі';
@@ -4866,10 +5677,14 @@ function renderOnboardingMissingTarget(step) {
   wait.textContent = step.waitFor ? 'Після потрібної дії тур продовжиться сам.' : '';
   onboarding.waitingFor = step.waitFor || null;
   positionOnboardingCard(null);
+  enableOnboardingLock(null);
 }
 
 function startOnboardingTour({ force = false, welcome = true } = {}) {
   if (!force && localStorage.getItem(ONBOARDING_COMPLETED_KEY) === 'true') return;
+  document.body.classList.add('onboarding-disable-risky-ui');
+closeRightPanels();
+newSpaceTemplate = 'blank';
   onboarding.active = true;
   onboarding.mode = welcome ? 'welcome' : 'tour';
   onboarding.stepIndex = force || welcome ? 0 : Math.max(0, Math.min(Number(localStorage.getItem(ONBOARDING_STEP_KEY) || 0), ONBOARDING_STEPS.length - 1));
@@ -4882,6 +5697,7 @@ function startOnboardingTour({ force = false, welcome = true } = {}) {
   onboarding.createdSpaceId = null;
   onboarding.pendingCanvasRect = null;
   onboarding.connectionSource = null;
+  onboarding.connectionDragActive = false;
   onboarding.simpleConnectSourceId = null;
   onboarding.targetStartedAt = 0;
   onboarding.enteredStepIndex = -1;
@@ -4906,9 +5722,12 @@ function restartOnboardingTour() {
 
 function completeOnboardingTour() {
   onboarding.active = false;
+  document.body.classList.remove('onboarding-disable-risky-ui');
+  newSpaceTemplate = 'blank';
   onboarding.waitingFor = null;
   document.body.classList.remove('onboarding-connection-mode');
   document.body.classList.remove('onboarding-simple-connect-mode');
+  disableOnboardingLock();
   emitLinkorEvent('onboarding-finished');
   clearTimeout(onboarding.targetTimer);
   clearOnboardingTarget();
@@ -4917,6 +5736,7 @@ function completeOnboardingTour() {
   document.getElementById('onboarding-overlay')?.classList.remove('active');
   document.getElementById('onboarding-canvas-target')?.remove();
   document.getElementById('onboarding-action-proxy')?.remove();
+  document.getElementById('onboarding-connection-hint')?.remove();
   renderOutdatedBanner();
 }
 
@@ -4931,18 +5751,13 @@ function nextOnboardingStep() {
     completeOnboardingTour();
     return;
   }
-  if (step?.waitFor) return;
+  if (step?.waitFor) {
+    if (step.waitFor !== 'space-name-entered' || !document.getElementById('new-space-name')?.value.trim()) return;
+  }
   onboarding.stepIndex = Math.min(ONBOARDING_STEPS.length - 1, onboarding.stepIndex + 1);
   onboarding.targetStartedAt = 0;
   onboarding.enteredStepIndex = -1;
   setTimeout(renderOnboardingStep, 40);
-}
-
-function prevOnboardingStep() {
-  if (!onboarding.active) return;
-  onboarding.stepIndex = Math.max(0, onboarding.stepIndex - 1);
-  onboarding.enteredStepIndex = -1;
-  renderOnboardingStep();
 }
 
 function advanceOnboardingStep(delay = 120) {
@@ -4963,12 +5778,14 @@ function handleOnboardingEvent(eventName, detail = {}) {
   }
   if (eventName === 'space-name-entered') {
     if (onboarding.waitingFor === 'space-name-entered') {
-      advanceOnboardingStep(120);
+      updateOnboardingActionState();
+      focusOnboardingTarget(document.getElementById('new-space-name'));
     }
     return;
   }
   if (eventName === 'connection-started') {
     if (onboarding.waitingFor === 'connection-started') {
+      onboarding.connectionDragActive = true;
       advanceOnboardingStep(80);
     }
     return;
@@ -4998,12 +5815,21 @@ function handleOnboardingEvent(eventName, detail = {}) {
     onboarding.secondNodeId = detail.nodeId || detail.id || onboarding.secondNodeId || state.selectedNodeId;
   }
   if (eventName === 'edge-created') {
+    onboarding.connectionDragActive = false;
+    hideOnboardingConnectionHint();
     onboarding.lastEdgeId = detail.edgeId || detail.id || onboarding.lastEdgeId;
   }
   if (eventName === 'space-created' && onboarding.waitingFor === 'space-created') {
     onboarding.createdSpaceId = detail.spaceId || detail.id || state.spaces[0]?.id || onboarding.createdSpaceId;
+    closeModal({ force: true });
+    clearOnboardingAllowedTargets();
     showPage('hub');
     renderHub();
+    waitForTarget(getOnboardingSpaceCardSelector(), 2000).then(target => {
+      if (!onboarding.active || onboarding.waitingFor !== 'space-created') return;
+      advanceOnboardingStep(target ? 80 : 160);
+    });
+    return;
   }
   if (onboarding.waitingFor === eventName) {
     advanceOnboardingStep(160);
@@ -5015,11 +5841,11 @@ function handleOnboardingEvent(eventName, detail = {}) {
 });
 
 window.addEventListener('resize', () => {
-  if (onboarding.active) renderOnboardingStep();
+  if (onboarding.active) refreshOnboardingLayout();
 });
 
 window.addEventListener('scroll', () => {
-  if (onboarding.active) renderOnboardingStep();
+  if (onboarding.active) refreshOnboardingLayout();
 }, true);
 
 window.resetLinkorOnboarding = function() {
@@ -5098,9 +5924,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Canvas listeners
   const wrap = document.getElementById('canvas-wrap');
   if (wrap) {
+    wrap.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+    });
     wrap.addEventListener('mousedown', (e) => {
+        if (e.target.closest('#ai-panel, #node-editor, .modal-overlay')) return;
       if (e.target === wrap || e.target.id === 'canvas-world' || e.target.closest('#grid-svg') || e.target.closest('#main-edges-svg')) {
-        if (state.tool === 'node') { addNodeAt(e); return; }
+        if (spacePanning || e.button === 1 || e.button === 2) {
+          e.preventDefault();
+          state.panning = true;
+          state.panStart = { x: e.clientX - state.view.x, y: e.clientY - state.view.y };
+          selectNode(null);
+          closeNodeEditor();
+          return;
+        }
+        if (state.tool === 'node' && e.button === 0) { addNodeAt(e); return; }
         if (state.tool === 'cut') { startCutting(e); return; }
         if (state.tool === 'connect') { cancelConnect(); return; }
         if (state.tool === 'select' && !e.altKey && e.button === 0) { startSelectionBox(e); return; }
@@ -5111,28 +5949,28 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
     wrap.addEventListener('dblclick', (e) => {
-      if (state.tool === 'select') addNodeAt(e);
+      if (state.tool === 'select' && e.button === 0) addNodeAt(e);
     });
     wrap.addEventListener('wheel', (e) => {
       e.preventDefault();
-      const step = e.deltaY > 0 ? -0.08 : 0.08;
-      state.zoomMomentum = Math.max(-0.35, Math.min(0.35, (state.zoomMomentum || 0) + step));
-      state.zoomAnchor = { x: e.clientX, y: e.clientY };
-      if (!state._zoomRAF) {
-        const tick = () => {
-          if (Math.abs(state.zoomMomentum || 0) < 0.002) {
-            state.zoomMomentum = 0;
-            state._zoomRAF = null;
-            return;
-          }
-          const factor = 1 + state.zoomMomentum;
-          zoom(factor, state.zoomAnchor?.x, state.zoomAnchor?.y);
-          state.zoomMomentum *= 0.86;
-          state._zoomRAF = requestAnimationFrame(tick);
-        };
-        state._zoomRAF = requestAnimationFrame(tick);
+      const isTrackpad = e.deltaMode === 0 && (Math.abs(e.deltaX) > 0 || Math.abs(e.deltaY) < 50);
+      if (e.ctrlKey || e.metaKey) {
+        smoothZoomFromWheel(e);
+      } else if (e.shiftKey) {
+        panCanvasBy(-e.deltaY, 0);
+      } else if (isTrackpad) {
+        panCanvasBy(-e.deltaX, -e.deltaY);
+      } else {
+        smoothZoomFromWheel(e);
       }
     }, { passive: false });
+    document.getElementById('ai-panel')?.addEventListener('wheel', (e) => {
+  e.stopPropagation();
+}, { passive: true });
+
+document.getElementById('ai-response-content')?.addEventListener('wheel', (e) => {
+  e.stopPropagation();
+}, { passive: true });
   }
 
   document.querySelectorAll('.engine-group .tool-btn, .engine-group .view-mode-btn, .quick-capture-btn').forEach(btn => {
@@ -5153,12 +5991,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (state.connectSource) updateTempEdge(e);
   });
   document.addEventListener('mouseup', (e) => {
-    handleOnboardingConnectionMouseUp(e);
-    if (state.selecting) finishSelectionBox();
-    if (state.cutting) finishCutting();
-    if (state.connectSource) finishConnectFromEvent(e);
-    state.panning = false;
-  });
+  handleOnboardingConnectionMouseUp(e);
+  if (state.selecting) finishSelectionBox();
+  if (state.cutting) finishCutting();
+
+  if (state.connectSource) {
+    const before = state.connectSource;
+    finishConnectFromEvent(e);
+
+    if (isOnboardingActive() && onboarding.waitingFor === 'edge-created' && onboarding.connectionSource && !state.connectSource) {
+      state.connectSource = { ...onboarding.connectionSource };
+    }
+  }
+
+  state.panning = false;
+});
 
   document.addEventListener('click', (e) => {
     if (!state.connectSource) return;
@@ -5166,25 +6013,149 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 });
 
-document.addEventListener('keydown', (e) => {
-  const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target?.tagName);
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+function isTypingTarget(target) {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
+function isEngineActive() {
+  return document.getElementById('engine')?.classList.contains('active');
+}
+
+function resetZoomAndCenterView() {
+  fitView();
+}
+
+function closeActivePanelsAndModes() {
+  if (document.getElementById('command-palette')?.style.display === 'flex') {
+    closeCommandPalette();
+    return true;
+  }
+  if (isOnboardingActive()) {
+    renderOnboardingStep();
+    return true;
+  }
+  if (document.getElementById('modal')?.style.display === 'flex') {
+    closeModal();
+    return true;
+  }
+  cancelConnect();
+  closeRightPanels();
+  setTool('select');
+  return true;
+}
+
+function handleGlobalHotkeys(e) {
+  const key = e.key;
+  const lowerKey = key.toLowerCase();
+  const mod = e.ctrlKey || e.metaKey;
+  const typing = isTypingTarget(e.target);
+  const inEngine = isEngineActive();
+
+  if (typing) return;
+
+  if (mod && lowerKey === 'k') {
     e.preventDefault();
     openCommandPalette();
     return;
   }
-  if (e.key === 'Escape' && document.getElementById('command-palette')?.style.display === 'flex') {
-    closeCommandPalette();
+
+  if (key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    closeActivePanelsAndModes();
     return;
   }
-  if (e.key === 'Escape' && isOnboardingActive()) {
-    completeOnboardingTour();
+
+  if (document.getElementById('modal')?.style.display === 'flex') return;
+  if (document.getElementById('command-palette')?.style.display === 'flex') return;
+
+  if (key === ' ' && inEngine && !e.repeat) {
+    e.preventDefault();
+    spacePanning = true;
+    document.body.classList.add('space-pan-active');
     return;
   }
-  if (e.key === 'Escape') { cancelConnect(); closeNodeEditor(); setTool('select'); }
-  if (!typing && e.key === 'Delete' && state.selectedNodeId) deleteSelected();
-  if (!typing && e.key === 'n' && !e.ctrlKey && !e.metaKey && document.getElementById('engine')?.classList.contains('active')) setTool('node');
-  if (!typing && e.ctrlKey && e.key === 's') { e.preventDefault(); saveNodeEdit(); }
+
+  if (!inEngine) return;
+
+  if (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight') {
+    e.preventDefault();
+    const step = e.shiftKey ? 120 : 40;
+    if (key === 'ArrowUp') state.view.y += step;
+    if (key === 'ArrowDown') state.view.y -= step;
+    if (key === 'ArrowLeft') state.view.x += step;
+    if (key === 'ArrowRight') state.view.x -= step;
+    applyView();
+    return;
+  }
+
+  if (mod && lowerKey === 'f') {
+    e.preventDefault();
+    document.getElementById('node-search')?.focus();
+    document.getElementById('node-search')?.select?.();
+    return;
+  }
+
+  if (mod && lowerKey === 's') {
+    e.preventDefault();
+    if (document.getElementById('node-editor')?.classList.contains('open')) saveNodeEdit();
+    else syncCurrentUserToSupabase();
+    return;
+  }
+
+  if (mod && lowerKey === 'd') {
+    e.preventDefault();
+    duplicateSelectedNode();
+    return;
+  }
+
+  if (mod && (key === '0' || e.code === 'Digit0' || e.code === 'Numpad0')) {
+    e.preventDefault();
+    resetZoomAndCenterView();
+    return;
+  }
+
+  if (mod && (key === '+' || key === '=' || e.code === 'NumpadAdd')) {
+    e.preventDefault();
+    const center = getCanvasCenterPoint();
+    zoom(1.16, center.x, center.y);
+    return;
+  }
+
+  if (mod && (key === '-' || e.code === 'NumpadSubtract')) {
+    e.preventDefault();
+    const center = getCanvasCenterPoint();
+    zoom(1 / 1.16, center.x, center.y);
+    return;
+  }
+
+  if (lowerKey === 'n' && !mod) {
+    e.preventDefault();
+    setTool('node');
+    return;
+  }
+
+  if ((key === 'Delete' || key === 'Backspace') && !mod) {
+    e.preventDefault();
+    deleteSelected();
+    return;
+  }
+
+  if (key === 'Enter' && state.selectedNodeId) {
+    e.preventDefault();
+    editNode(e, state.selectedNodeId);
+  }
+}
+
+document.addEventListener('keydown', handleGlobalHotkeys);
+
+document.addEventListener('keyup', (e) => {
+  if (e.key !== ' ') return;
+  spacePanning = false;
+  document.body.classList.remove('space-pan-active');
 });
 
 function setSyncStatus(status = 'local', message = '') {
