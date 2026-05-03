@@ -5171,22 +5171,54 @@ function clearOnboardingAllowedTargets() {
 
 function updateOnboardingAllowedTarget(target) {
   clearOnboardingAllowedTargets();
+
   if (!isOnboardingActive()) return;
+
   document.getElementById('onboarding-card')?.classList.add('onboarding-allowed-target');
   document.getElementById('onboarding-welcome')?.classList.add('onboarding-allowed-target');
+
   if (!target) return;
+
   target.classList.add('onboarding-allowed-target');
+
   target.querySelectorAll?.('button, input, textarea, select, [onclick], [role="button"], .node-anchor').forEach(el => {
     el.classList.add('onboarding-allowed-target');
   });
+
   const modal = target.closest?.('#modal');
+
   if (modal) {
     modal.classList.add('onboarding-modal-active');
     modal.querySelector('.modal-box')?.classList.add('onboarding-modal-active');
+
     modal.querySelectorAll('button, input, textarea, select, [onclick], [role="button"], .template-card, .modal-tone').forEach(el => {
       const allowed = el === target || target.contains(el) || el.contains(target);
       el.classList.toggle('onboarding-locked-disabled', !allowed);
     });
+  }
+
+  const input = target.matches?.('input, textarea')
+    ? target
+    : target.querySelector?.('input, textarea');
+
+  if (input) {
+    input.classList.add('onboarding-allowed-target');
+    input.classList.remove('onboarding-locked-disabled');
+
+    input.disabled = false;
+    input.readOnly = false;
+
+    input.style.pointerEvents = 'auto';
+    input.style.userSelect = 'text';
+    input.style.opacity = '1';
+    input.style.zIndex = '9999';
+
+    input.closest('.onboarding-locked-disabled')?.classList.remove('onboarding-locked-disabled');
+
+    setTimeout(() => {
+      input.focus();
+      input.select?.();
+    }, 80);
   }
 }
 
@@ -6150,14 +6182,16 @@ function handleGlobalHotkeys(e) {
   }
 }
 
-document.addEventListener('keydown', handleGlobalHotkeys);
+document.addEventListener('keydown', (e) => {
+  if (isTypingTarget(e.target)) return;
+  handleGlobalHotkeys(e);
+});
 
 document.addEventListener('keyup', (e) => {
   if (e.key !== ' ') return;
   spacePanning = false;
   document.body.classList.remove('space-pan-active');
 });
-
 function setSyncStatus(status = 'local', message = '') {
   const el = document.getElementById('sync-status');
   if (!el) return;

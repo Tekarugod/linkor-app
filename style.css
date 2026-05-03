@@ -3240,3 +3240,33 @@ body.onboarding-disable-risky-ui #btn-ai-panel {
   border-color: rgba(255,209,102,0.75);
   box-shadow: 0 0 0 1px rgba(255,209,102,0.24);
 }
+.update-content h2 {
+  color: #00ffd0;
+  font-size: 16px;
+  margin-top: 16px;
+}
+
+.update-content ul {
+  padding-left: 18px;
+  margin-top: 6px;
+}
+
+.update-content li {
+  margin-bottom: 6px;
+  color: #ccc;
+}
+body.onboarding-locked .onboarding-allowed-target,
+body.onboarding-locked .onboarding-allowed-target *,
+body.onboarding-disable-risky-ui .onboarding-allowed-target,
+body.onboarding-disable-risky-ui .onboarding-allowed-target * {
+  pointer-events: auto !important;
+}
+
+body.onboarding-locked input.onboarding-allowed-target,
+body.onboarding-locked textarea.onboarding-allowed-target,
+body.onboarding-disable-risky-ui input.onboarding-allowed-target,
+body.onboarding-disable-risky-ui textarea.onboarding-allowed-target {
+  user-select: text !important;
+  cursor: text !important;
+  opacity: 1 !important;
+}
