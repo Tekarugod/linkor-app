@@ -12,9 +12,14 @@ let hubUpdateDetailsOpen = false;
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 2.5;
 const WHEEL_ZOOM_SPEED = 0.0012;
+let wheelZoomAnchor = null;
+let wheelZoomAnchorTimer = null;
 let spacePanning = false;
 let aiThinkingInProgress = false;
 let aiThinkingInterval = null;
+let isAdvancedMode = localStorage.getItem('linkorAdvancedMode') === 'true';
+let originalGateCardHTML = null;
+let editorTagDraft = [];
 
 let state = {
   users: {},
@@ -73,6 +78,21 @@ const NODE_TYPES = {
   decision: { label: 'Decision', short: 'DC', color: '#ff006e' },
   subtopic: { label: 'Subtopic', short: 'SUB', color: '#8bf3ff' }
 };
+const NODE_STATUSES = {
+  none: { label: 'Без статусу', short: '○', className: 'none' },
+  progress: { label: 'В роботі', short: '◐', className: 'progress' },
+  done: { label: 'Виконано', short: '✓', className: 'done' }
+};
+
+function getNodeStatusConfig(status) {
+  return NODE_STATUSES[status] || NODE_STATUSES.none;
+}
+
+function getNextNodeStatus(status) {
+  if (status === 'none' || !status) return 'progress';
+  if (status === 'progress') return 'done';
+  return 'none';
+}
 const SPACE_TEMPLATES = {
   blank: {
     name: 'Blank',
@@ -438,8 +458,7 @@ const I18N = {
     density: 'Щільність', plan: 'План', usage: 'Використано', connectionMode: 'РЕЖИМ ЗВ’ЯЗКУ - вибери цільовий вузол',
     analyzingNodes: 'Аналіз вузлів...', aiPrompt: 'Відкрий AI помічника з бічної панелі, щоб проаналізувати граф.',
     nodeEditor: 'Редактор вузла', title: 'Заголовок', titlePlaceholder: 'Назва думки...', description: 'Опис',
-    descPlaceholder: 'Детальний опис...', tags: 'Теги (через кому)', tagsPlaceholder: 'ідея, проєкт, важливо',
-    nodeType: 'Тип вузла', color: 'Колір', connectedNodes: 'Пов’язані вузли', save: 'ЗБЕРЕГТИ', close: 'ЗАКРИТИ',
+    descPlaceholder: 'Детальний опис...', tags: 'Теги', tagsPlaceholder: 'Напиши тег і натисни Enter',    nodeType: 'Тип вузла', color: 'Колір', connectedNodes: 'Пов’язані вузли', save: 'ЗБЕРЕГТИ', close: 'ЗАКРИТИ',
     appearance: 'Вигляд', profile: 'Профіль', data: 'Дані', about: 'Про систему', backHub: 'НАЗАД У ХАБ',
     commandPalette: 'Палітра команд', commandPlaceholder: 'Введи команду...', language: 'Мова',
     languageSub: 'Вибери мову інтерфейсу', english: 'Англійська', ukrainian: 'Українська', russian: 'Російська',
@@ -851,6 +870,7 @@ function showPage(id) {
     setSettingsTab('appearance');
     renderSettings('appearance');
   }
+  if (id === 'engine') applyAdvancedMode();
 }
 
 async function loadAppVersion() {
@@ -1382,6 +1402,36 @@ function setActiveSidebarGroup(section) {
     group.classList.toggle('active', group.dataset.group === section);
   });
 }
+function applyAdvancedMode() {
+  document.body.classList.toggle('advanced-mode', isAdvancedMode);
+
+  const btn = document.getElementById('advanced-mode-toggle');
+  if (btn) {
+    btn.textContent = isAdvancedMode ? 'Advanced' : 'Basic';
+    btn.classList.toggle('active', isAdvancedMode);
+    btn.title = isAdvancedMode ? 'Увімкнено розширений режим' : 'Увімкнено базовий режим';
+  }
+
+  if (!isAdvancedMode) {
+    if (['cut'].includes(state.tool)) setTool('select');
+
+    if (['list', 'timeline', 'focus'].includes(state.viewMode)) {
+      setViewMode('graph');
+    }
+
+    ['organize', 'history', 'stats'].forEach(section => {
+      const group = document.querySelector(`.engine-group[data-group="${section}"]`);
+      if (group) group.classList.add('collapsed');
+    });
+  }
+}
+
+function toggleAdvancedMode() {
+  isAdvancedMode = !isAdvancedMode;
+  localStorage.setItem('linkorAdvancedMode', String(isAdvancedMode));
+  applyAdvancedMode();
+  showToast(isAdvancedMode ? 'Розширений режим увімкнено' : 'Базовий режим увімкнено');
+}
 
 function applySidebarState() {
   const defaults = { thinking: true, editing: true, organize: true, view: true, history: true, stats: false };
@@ -1451,6 +1501,56 @@ function renderMiniMap() {
 }
 
 // ===== AUTH =====
+function showStartupLoading() {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+
+  const gate = document.getElementById('gate');
+  if (!gate) return;
+
+  gate.classList.add('active');
+
+  const gateCard = gate.querySelector('.gate-card');
+  if (!gateCard) return;
+
+  if (!originalGateCardHTML) {
+    originalGateCardHTML = gateCard.innerHTML;
+  }
+
+  gateCard.classList.add('startup-loading-mode');
+
+  gateCard.innerHTML = `
+    <div class="startup-card">
+      <div class="startup-mark">
+        <img src="assets/logo.png" alt="Linkor">
+      </div>
+
+      <div class="startup-brand">
+        <div class="startup-title">Linkor</div>
+        <div class="startup-subtitle">// thinking graph engine</div>
+      </div>
+
+      <div class="startup-loading-box">
+        <div class="startup-spinner"></div>
+        <div>
+          <div class="startup-loading-title">Відновлюємо сесію…</div>
+          <div class="startup-loading-text">Перевіряємо акаунт і готуємо простір.</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+function restoreGateAuthUI() {
+  const gate = document.getElementById('gate');
+  const gateCard = gate?.querySelector('.gate-card');
+
+  if (!gateCard || !originalGateCardHTML) return;
+
+  gateCard.classList.remove('startup-loading-mode');
+  gateCard.innerHTML = originalGateCardHTML;
+
+  applyStaticTranslations();
+}
+
 function switchTab(tab) {
   document.querySelectorAll('.gate-tab').forEach((t, i) => {
     t.classList.toggle('active', (i === 0 && tab === 'login') || (i === 1 && tab === 'register'));
@@ -1610,7 +1710,9 @@ async function doLogout() {
   state.nodes = {};
   state.edges = {};
   saveState();
-  showPage('gate');
+restoreGateAuthUI();
+showPage('gate');
+switchTab('login');
 }
 
 async function restoreAuthOnStartup() {
@@ -1654,6 +1756,7 @@ async function restoreAuthOnStartup() {
   state.users[email].nick = nick;
   state.users[email].supabaseId = result.user.id;
   state.currentUser = email;
+  state.language = 'uk';
   hydrateCurrentUserData();
 
   if (typeof loadCurrentUserFromSupabase === 'function') {
@@ -2397,6 +2500,7 @@ function renderStructuredView() {
 function createNodeEl(node) {
   const colorSet = NODE_COLORS[node.colorIdx || 0];
   const type = NODE_TYPES[node.type || 'idea'] || NODE_TYPES.idea;
+  const status = getNodeStatusConfig(node.status || 'none');
   const anchorsHtml = getNodeAnchors(node).map(anchor => (
     `<button class="node-anchor node-anchor-${anchor}" data-anchor="${anchor}" data-node-id="${escAttr(node.id)}" title="${anchor}"></button>`
   )).join('');
@@ -2414,10 +2518,11 @@ function createNodeEl(node) {
   div.innerHTML = `
     <div class="node-anchor-layer">${anchorsHtml}</div>
     <div class="node-header">
-      <div class="node-dot" style="background:${colorSet.dot};box-shadow:0 0 8px ${colorSet.dot}"></div>
-      <div class="node-title">${escHtml(node.title)}</div>
-      <div class="node-type" style="border-color:${type.color};color:${type.color}" title="${escAttr(typeLabel(node.type || 'idea'))}">${type.short}</div>
-    </div>
+  <div class="node-dot" style="background:${colorSet.dot};box-shadow:0 0 8px ${colorSet.dot}"></div>
+  <div class="node-title">${escHtml(node.title)}</div>
+  <button class="node-status node-status-${status.className}" onclick="toggleNodeStatus(event,'${node.id}')" title="${escAttr(status.label)}">${status.short}</button>
+  <div class="node-type" style="border-color:${type.color};color:${type.color}" title="${escAttr(typeLabel(node.type || 'idea'))}">${type.short}</div>
+</div>
     ${node.desc ? `<div class="node-desc">${escHtml(node.desc)}</div>` : ''}
     ${tagsHtml ? `<div class="node-tags">${tagsHtml}</div>` : ''}
     <div class="node-actions">
@@ -2648,26 +2753,63 @@ function screenToWorld(clientX, clientY, view = state.view) {
 }
 
 function zoom(factor, cx, cy) {
-  const center = getCanvasCenterPoint();
-  const clientX = cx ?? center.x;
-  const clientY = cy ?? center.y;
-  const cursor = getCanvasLocalPoint(clientX, clientY);
-  if (!cursor) return;
+  const wrap = document.getElementById('canvas-wrap');
+  if (!wrap) return;
+
+  const rect = wrap.getBoundingClientRect();
+
+  const mouseX = (cx ?? (rect.left + rect.width / 2)) - rect.left;
+  const mouseY = (cy ?? (rect.top + rect.height / 2)) - rect.top;
+
   const oldScale = state.view.scale || 1;
   const newScale = clampZoom(oldScale * factor);
-  if (newScale === oldScale) return;
-  const worldBeforeZoom = screenToWorld(clientX, clientY, state.view);
-  if (!worldBeforeZoom) return;
+
+  if (Math.abs(newScale - oldScale) < 0.0001) return;
+
+  const worldX = (mouseX - state.view.x) / oldScale;
+  const worldY = (mouseY - state.view.y) / oldScale;
+
   state.view.scale = newScale;
-  state.view.x = cursor.x - worldBeforeZoom.x * newScale;
-  state.view.y = cursor.y - worldBeforeZoom.y * newScale;
-  applyView();
+state.view.x = mouseX - worldX * newScale;
+state.view.y = mouseY - worldY * newScale;
+
+if (state.panning) {
+  const anchorClientX = cx ?? (rect.left + rect.width / 2);
+  const anchorClientY = cy ?? (rect.top + rect.height / 2);
+
+  state.panStart = {
+    x: anchorClientX - state.view.x,
+    y: anchorClientY - state.view.y
+  };
 }
 
-function smoothZoomFromWheel(e) {
-  const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SPEED);
-  zoom(factor, e.clientX, e.clientY);
+applyView();
 }
+
+function zoomFromWheelStable(e) {
+  const isActivePan = Boolean(state.panning);
+
+  if (!wheelZoomAnchor || isActivePan) {
+    wheelZoomAnchor = { x: e.clientX, y: e.clientY };
+  }
+
+  clearTimeout(wheelZoomAnchorTimer);
+  wheelZoomAnchorTimer = setTimeout(() => {
+    wheelZoomAnchor = null;
+    wheelZoomAnchorTimer = null;
+  }, 180);
+
+  const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SPEED);
+  zoom(factor, wheelZoomAnchor.x, wheelZoomAnchor.y);
+
+  if (state.panning) {
+    state.panStart = {
+      x: e.clientX - state.view.x,
+      y: e.clientY - state.view.y
+    };
+  }
+}
+
 
 function fitView() {
   const nodes = getSpaceNodes();
@@ -2727,17 +2869,18 @@ function createNode(x, y, title, desc, colorIdx, type = 'idea', options = {}) {
   const id = 'n_' + (++state.nodeIdCounter);
   const nodeX = state.snapToGrid ? snapValue(x) : x;
   const nodeY = state.snapToGrid ? snapValue(y) : y;
-  state.nodes[id] = {
-    id,
-    spaceId: state.currentSpaceId,
-    x: nodeX,
-    y: nodeY,
-    title: title || tr('typeIdea'),
-    desc: desc || '',
-    tags: '',
-    colorIdx: colorIdx || 0,
-    type
-  };
+ state.nodes[id] = {
+  id,
+  spaceId: state.currentSpaceId,
+  x: nodeX,
+  y: nodeY,
+  title: title || tr('typeIdea'),
+  desc: desc || '',
+  tags: '',
+  status: 'none',
+  colorIdx: colorIdx || 0,
+  type
+};
   applyOnboardingNodePosition(state.nodes[id]);
   if (!options.skipSave) saveState();
   const world = document.getElementById('canvas-world');
@@ -3428,7 +3571,6 @@ function connectSuggested(fromId, toId) {
     showToast(`⚠ ${tr('linkButton')} exists`);
   }
 }
-
 function parseTagList(value) {
   return String(value || '')
     .split(',')
@@ -3439,13 +3581,25 @@ function parseTagList(value) {
 function dedupeTags(tags) {
   const seen = new Set();
   const result = [];
+
   tags.forEach(tag => {
-    const key = tag.toLowerCase();
+    const clean = normalizeTag(tag);
+    const key = clean.toLowerCase();
+
     if (!key || seen.has(key)) return;
+
     seen.add(key);
-    result.push(tag);
+    result.push(clean);
   });
+
   return result;
+}
+
+function normalizeTag(tag) {
+  return String(tag || '')
+    .trim()
+    .replace(/^,+|,+$/g, '')
+    .replace(/\s+/g, ' ');
 }
 
 function normalizeTagInput(value) {
@@ -3458,44 +3612,52 @@ function getCurrentSpaceExistingTags(excludeNodeId = null) {
       .filter(node => {
         if (!node || !node.tags) return false;
         if (excludeNodeId && node.id === excludeNodeId) return false;
-        if (state.currentSpaceId && node.spaceId) {
-          return node.spaceId === state.currentSpaceId;
-        }
-        return false;
+        return state.currentSpaceId && node.spaceId === state.currentSpaceId;
       })
       .flatMap(node => parseTagList(node.tags))
   ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 }
 
-function getCurrentTagDraft(input) {
-  const value = input?.value || '';
-  const lastComma = value.lastIndexOf(',');
-  return value.slice(lastComma + 1).trim();
+function renderEditorTagChips() {
+  const container = document.getElementById('editor-tags-chips');
+  if (!container) return;
+
+  container.innerHTML = editorTagDraft.map(tag => `
+    <button type="button" class="editor-tag-chip" onclick="removeEditorTag(decodeURIComponent('${encodeURIComponent(tag)}'))">
+      <span>${escHtml(tag)}</span>
+      <b>×</b>
+    </button>
+  `).join('');
 }
 
-function getCommittedEditorTags(input) {
-  const value = input?.value || '';
-  const lastComma = value.lastIndexOf(',');
-  if (lastComma === -1) return [];
-  return parseTagList(value.slice(0, lastComma));
+function addEditorTag(tag) {
+  const clean = normalizeTag(tag);
+  if (!clean) return;
+
+  const exists = editorTagDraft.some(t => t.toLowerCase() === clean.toLowerCase());
+  if (exists) return;
+
+  editorTagDraft.push(clean);
+  renderEditorTagChips();
+  renderTagSuggestions();
 }
 
-function setEditorTags(tags) {
-  const input = document.getElementById('editor-tags');
-  if (!input) return;
-  input.value = dedupeTags(tags).join(', ');
+function removeEditorTag(tag) {
+  editorTagDraft = editorTagDraft.filter(t => t.toLowerCase() !== String(tag).toLowerCase());
+  renderEditorTagChips();
   renderTagSuggestions();
 }
 
 function commitEditorTag(tag = null) {
   const input = document.getElementById('editor-tags');
   if (!input) return;
-  const draft = String(tag ?? getCurrentTagDraft(input)).trim();
-  const currentDraft = getCurrentTagDraft(input).toLowerCase();
-  const replacesDraft = tag && currentDraft && String(tag).toLowerCase().includes(currentDraft);
-  const tags = tag && !replacesDraft ? parseTagList(input.value) : getCommittedEditorTags(input);
-  if (draft) tags.push(draft);
-  setEditorTags(tags);
+
+  const draft = normalizeTag(tag ?? input.value);
+  if (!draft) return;
+
+  addEditorTag(draft);
+  input.value = '';
+  hideTagSuggestions();
 }
 
 function addTagSuggestion(tag) {
@@ -3506,6 +3668,7 @@ function addTagSuggestion(tag) {
 function hideTagSuggestions() {
   const box = document.getElementById('tag-suggestions');
   if (!box) return;
+
   box.innerHTML = '';
   box.classList.remove('visible');
 }
@@ -3513,11 +3676,13 @@ function hideTagSuggestions() {
 function renderTagSuggestions() {
   const input = document.getElementById('editor-tags');
   const box = document.getElementById('tag-suggestions');
+
   if (!input || !box || document.activeElement !== input) return;
-  const existingTags = getCurrentSpaceExistingTags(state.selectedNodeId);
-  const currentTags = new Set(parseTagList(input.value).map(tag => tag.toLowerCase()));
-  const draft = getCurrentTagDraft(input).toLowerCase();
-  const suggestions = existingTags
+
+  const draft = normalizeTag(input.value).toLowerCase();
+  const currentTags = new Set(editorTagDraft.map(tag => tag.toLowerCase()));
+
+  const suggestions = getCurrentSpaceExistingTags(state.selectedNodeId)
     .filter(tag => !currentTags.has(tag.toLowerCase()))
     .filter(tag => !draft || tag.toLowerCase().includes(draft))
     .slice(0, 8);
@@ -3527,32 +3692,57 @@ function renderTagSuggestions() {
     return;
   }
 
-  box.innerHTML = suggestions
-    .map(tag => `<button type="button" class="tag-suggestion" onmousedown="event.preventDefault()" onclick="addTagSuggestion(decodeURIComponent('${encodeURIComponent(tag)}'))">${escHtml(tag)}</button>`)
-    .join('');
+  box.innerHTML = suggestions.map(tag => `
+    <button type="button" class="tag-suggestion" onmousedown="event.preventDefault()" onclick="addTagSuggestion(decodeURIComponent('${encodeURIComponent(tag)}'))">
+      ${escHtml(tag)}
+    </button>
+  `).join('');
+
   box.classList.add('visible');
 }
 
 function setupTagsAutocomplete() {
   const input = document.getElementById('editor-tags');
   if (!input || input.dataset.autocompleteReady === 'true') return;
+
   input.dataset.autocompleteReady = 'true';
+
   input.addEventListener('focus', renderTagSuggestions);
   input.addEventListener('input', renderTagSuggestions);
-  input.addEventListener('blur', () => setTimeout(hideTagSuggestions, 120));
+  input.addEventListener('blur', () => {
+    if (input.value.trim()) {
+      commitEditorTag(input.value);
+    }
+
+    setTimeout(hideTagSuggestions, 120);
+  });
+
   input.addEventListener('keydown', event => {
     if (event.key !== 'Enter' && event.key !== ',') return;
+
     event.preventDefault();
     event.stopPropagation();
-    commitEditorTag();
+
+    commitEditorTag(input.value);
   });
 }
 
 // ===== NODE EDITOR =====
 function closeRightPanels(exceptId = null) {
-  ['ai-panel', 'node-editor'].forEach(id => {
-    if (id !== exceptId) document.getElementById(id)?.classList.remove('open');
+  const panels = ['ai-panel', 'node-editor'];
+
+  panels.forEach(id => {
+    const panel = document.getElementById(id);
+    if (!panel) return;
+
+    if (id === exceptId) {
+      panel.classList.add('open');
+    } else {
+      panel.classList.remove('open');
+    }
   });
+
+  if (exceptId !== 'node-editor') hideTagSuggestions?.();
 }
 function editNode(e, nodeId) {
   e.stopPropagation();
@@ -3561,9 +3751,15 @@ function editNode(e, nodeId) {
   if (!node) return;
   document.getElementById('editor-title').value = node.title;
   document.getElementById('editor-desc').value = node.desc || '';
-  document.getElementById('editor-tags').value = node.tags || '';
+  editorTagDraft = parseTagList(node.tags || '');
+  document.getElementById('editor-tags').value = '';
+  renderEditorTagChips();
   setupTagsAutocomplete();
   renderTagSuggestions();
+  const statusSelect = document.getElementById('editor-status');
+if (statusSelect) {
+  statusSelect.value = node.status || 'none';
+}
   const typeSelect = document.getElementById('editor-type');
   if (typeSelect) {
     typeSelect.innerHTML = Object.entries(NODE_TYPES)
@@ -3611,8 +3807,16 @@ function saveNodeEdit() {
   captureHistory(tr('edit'));
   node.title = document.getElementById('editor-title')?.value || tr('title');
   node.desc = document.getElementById('editor-desc')?.value || '';
-  node.tags = normalizeTagInput(document.getElementById('editor-tags')?.value || '');
-  node.type = document.getElementById('editor-type')?.value || 'idea';
+const tagInput = document.getElementById('editor-tags');
+
+if (tagInput?.value.trim()) {
+  commitEditorTag(tagInput.value);
+}
+
+editorTagDraft = dedupeTags(editorTagDraft);
+node.tags = editorTagDraft.join(', ');
+node.status = document.getElementById('editor-status')?.value || 'none';
+node.type = document.getElementById('editor-type')?.value || 'idea';
   const activeColor = document.querySelector('.color-swatch.active');
   if (activeColor) node.colorIdx = parseInt(activeColor.dataset.idx);
   saveState();
@@ -3628,6 +3832,14 @@ function saveNodeEdit() {
       typeEl.style.borderColor = type.color;
       typeEl.style.color = type.color;
     }
+    const statusEl = el.querySelector('.node-status');
+const status = getNodeStatusConfig(node.status || 'none');
+
+if (statusEl) {
+  statusEl.className = `node-status node-status-${status.className}`;
+  statusEl.textContent = status.short;
+  statusEl.title = status.label;
+}
     const descEl = el.querySelector('.node-desc');
     if (node.desc) {
       if (descEl) descEl.textContent = node.desc;
@@ -3639,12 +3851,12 @@ function saveNodeEdit() {
     const tagsContainer = el.querySelector('.node-tags');
     if (tagsContainer) {
       tagsContainer.innerHTML = node.tags
-        ? node.tags.split(',').map(t => `<span class="node-tag">${escHtml(t.trim())}</span>`).join('')
-        : '';
+  ? parseTagList(node.tags).map(t => `<span class="node-tag">${escHtml(t)}</span>`).join('')
+  : '';
     } else if (node.tags) {
       const tagsDiv = document.createElement('div');
       tagsDiv.className = 'node-tags';
-      tagsDiv.innerHTML = node.tags.split(',').map(t => `<span class="node-tag">${escHtml(t.trim())}</span>`).join('');
+     tagsDiv.innerHTML = parseTagList(node.tags).map(t => `<span class="node-tag">${escHtml(t)}</span>`).join('');
       const actionsEl = el.querySelector('.node-actions');
       if (actionsEl) actionsEl.before(tagsDiv);
     }
@@ -3657,7 +3869,25 @@ function closeNodeEditor() {
   document.getElementById('node-editor')?.classList.remove('open');
   hideTagSuggestions();
 }
+function toggleNodeStatus(event, nodeId) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
 
+  const node = state.nodes[nodeId];
+  if (!node) return;
+
+  node.status = getNextNodeStatus(node.status || 'none');
+
+  saveState();
+
+  const el = document.getElementById('node-' + nodeId);
+  if (el) {
+    const fresh = createNodeEl(node);
+    el.replaceWith(fresh);
+  }
+
+  showToast(`Статус: ${getNodeStatusConfig(node.status).label}`);
+}
 // ===== AUTO LAYOUT =====
 function autoLayout() {
   const nodes = getSpaceNodes();
@@ -4767,18 +4997,36 @@ function toggleAIPanel() {
   const panel = document.getElementById('ai-panel');
   if (!panel) return;
 
-  const willOpen = !panel.classList.contains('open');
-  if (willOpen) closeRightPanels('ai-panel');
+  const isOpen = panel.classList.contains('open');
 
-  panel.classList.toggle('open');
-if (panel.classList.contains('open')) {
+  closeRightPanels();
+
+  if (isOpen) return;
+
+  panel.classList.add('open');
+
   resetAIChat('Напиши ідею і натисни “Згенерувати вузли”.');
+
   const input = document.getElementById('ai-prompt-input');
   const quick = document.getElementById('quick-capture-input');
-  if (input && quick?.value.trim() && !input.value.trim()) input.value = quick.value.trim();
+
+  if (input && quick?.value.trim() && !input.value.trim()) {
+    input.value = quick.value.trim();
+  }
+
   input?.focus();
 }
-}
+  resetAIChat('Напиши ідею і натисни “Згенерувати вузли”.');
+
+  const input = document.getElementById('ai-prompt-input');
+  const quick = document.getElementById('quick-capture-input');
+
+  if (input && quick?.value.trim() && !input.value.trim()) {
+    input.value = quick.value.trim();
+  }
+
+  input?.focus();
+
 
 function closeAIPanel() {
   document.getElementById('ai-panel')?.classList.remove('open');
@@ -5900,17 +6148,40 @@ window.startLinkorOnboardingDebug = function() {
 
 // ===== EVENT LISTENERS =====
 document.addEventListener('DOMContentLoaded', async () => {
+  showStartupLoading();
+
   loadState();
-  await restoreAuthOnStartup();
+
+  // Gate/login screen always starts in Ukrainian.
+  // User can change language later in settings.
+  state.language = 'uk';
+
   applyAccentColor();
   if (state.theme) applyTheme(state.theme, true);
-  if (state.currentUser) showPage('hub');
-  else showPage('gate');
+  applyStaticTranslations();
+
+  await Promise.race([
+  restoreAuthOnStartup(),
+  new Promise(resolve => setTimeout(resolve, 2500))
+]);
+
+  applyStaticTranslations();
+
+ if (state.currentUser) {
+  showPage('hub');
+} else {
+  restoreGateAuthUI();
+  showPage('gate');
+  switchTab('login');
+}
+
   if (state.currentUser && localStorage.getItem(ONBOARDING_COMPLETED_KEY) !== 'true') {
     setTimeout(() => startOnboardingTour(), 180);
   }
+
   setSyncStatus(state.hasUnsyncedChanges ? 'unsynced' : 'local');
   startAutoSyncTimer();
+  applyAdvancedMode();
 
   // Кнопка Enter на странице входа
   const loginPass = document.getElementById('login-pass');
@@ -5959,43 +6230,84 @@ document.addEventListener('DOMContentLoaded', async () => {
     wrap.addEventListener('contextmenu', (e) => {
       e.preventDefault();
     });
-    wrap.addEventListener('mousedown', (e) => {
-        if (e.target.closest('#ai-panel, #node-editor, .modal-overlay')) return;
-      if (e.target === wrap || e.target.id === 'canvas-world' || e.target.closest('#grid-svg') || e.target.closest('#main-edges-svg')) {
-        if (spacePanning || e.button === 1 || e.button === 2) {
-          e.preventDefault();
-          state.panning = true;
-          state.panStart = { x: e.clientX - state.view.x, y: e.clientY - state.view.y };
-          selectNode(null);
-          closeNodeEditor();
-          return;
-        }
-        if (state.tool === 'node' && e.button === 0) { addNodeAt(e); return; }
-        if (state.tool === 'cut') { startCutting(e); return; }
-        if (state.tool === 'connect') { cancelConnect(); return; }
-        if (state.tool === 'select' && !e.altKey && e.button === 0) { startSelectionBox(e); return; }
-        state.panning = true;
-        state.panStart = { x: e.clientX - state.view.x, y: e.clientY - state.view.y };
-        selectNode(null);
-        closeNodeEditor();
-      }
-    });
+   wrap.addEventListener('mousedown', (e) => {
+  if (e.target.closest('#ai-panel, #node-editor, .modal-overlay')) return;
+
+  const isCanvasTarget =
+    e.target === wrap ||
+    e.target.id === 'canvas-world' ||
+    e.target.closest('#grid-svg') ||
+    e.target.closest('#main-edges-svg');
+
+  if (!isCanvasTarget) return;
+
+ if (spacePanning || e.button === 1 || e.button === 2) {
+  e.preventDefault();
+  wheelZoomAnchor = null;
+  clearTimeout(wheelZoomAnchorTimer);
+  state.panning = true;
+  state.panStart = { x: e.clientX - state.view.x, y: e.clientY - state.view.y };
+  selectNode(null);
+  closeRightPanels();
+  return;
+}
+
+  if (state.tool === 'node' && e.button === 0) {
+    addNodeAt(e);
+    return;
+  }
+
+  if (state.tool === 'cut') {
+    startCutting(e);
+    return;
+  }
+
+  if (state.tool === 'connect') {
+    cancelConnect();
+    return;
+  }
+
+  if (state.tool === 'select' && !e.altKey && e.button === 0) {
+    startSelectionBox(e);
+    return;
+  }
+
+  state.panning = true;
+  state.panStart = { x: e.clientX - state.view.x, y: e.clientY - state.view.y };
+  selectNode(null);
+  closeRightPanels();
+});
     wrap.addEventListener('dblclick', (e) => {
       if (state.tool === 'select' && e.button === 0) addNodeAt(e);
     });
-    wrap.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const isTrackpad = e.deltaMode === 0 && (Math.abs(e.deltaX) > 0 || Math.abs(e.deltaY) < 50);
-      if (e.ctrlKey || e.metaKey) {
-        smoothZoomFromWheel(e);
-      } else if (e.shiftKey) {
-        panCanvasBy(-e.deltaY, 0);
-      } else if (isTrackpad) {
-        panCanvasBy(-e.deltaX, -e.deltaY);
-      } else {
-        smoothZoomFromWheel(e);
-      }
-    }, { passive: false });
+   wrap.addEventListener('wheel', (e) => {
+  if (e.target.closest('#ai-panel, #node-editor, .modal-overlay, #modal')) return;
+
+  e.preventDefault();
+
+  const isPinchZoom = e.ctrlKey || e.metaKey;
+  const isHorizontalPan = e.shiftKey;
+
+  // Trackpad: коли є deltaX або маленький плавний deltaY — це pan, не zoom.
+  const isLikelyTrackpad =
+    !isPinchZoom &&
+    !isHorizontalPan &&
+    e.deltaMode === 0 &&
+    (Math.abs(e.deltaX) > 0 || Math.abs(e.deltaY) < 32);
+
+  if (isHorizontalPan) {
+    panCanvasBy(-e.deltaY, 0);
+    return;
+  }
+
+  if (isLikelyTrackpad) {
+    panCanvasBy(-e.deltaX, -e.deltaY);
+    return;
+  }
+
+  // Mouse wheel: zoom до стабільного якоря, щоб рух мишки не зсував полотно.
+zoomFromWheelStable(e);
+}, { passive: false });
     document.getElementById('ai-panel')?.addEventListener('wheel', (e) => {
   e.stopPropagation();
 }, { passive: true });
@@ -6037,6 +6349,8 @@ document.getElementById('ai-response-content')?.addEventListener('wheel', (e) =>
   }
 
   state.panning = false;
+wheelZoomAnchor = null;
+clearTimeout(wheelZoomAnchorTimer);
 });
 
   document.addEventListener('click', (e) => {

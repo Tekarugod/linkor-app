@@ -276,6 +276,20 @@ ipcMain.handle('auth:restore', async () => {
   }
 });
 
+async function deleteCloudRowsNotIn(table, userId, keepLocalIds = []) {
+  let query = supabase
+    .from(table)
+    .delete()
+    .eq('user_id', userId);
+
+  if (keepLocalIds.length) {
+    query = query.not('local_id', 'in', `(${keepLocalIds.map(id => `"${String(id).replace(/"/g, '\\"')}"`).join(',')})`);
+  }
+
+  const { error } = await query;
+  if (error) throw error;
+}
+
 ipcMain.handle('cloud:push', async (event, payload = {}) => {
   try {
     const userId = await getCurrentSupabaseUserId();
@@ -311,22 +325,7 @@ ipcMain.handle('cloud:push', async (event, payload = {}) => {
         error: 'Refusing to sync nodes or edges without spaces'
       };
     }
-
-    if (!spaces.length) {
-      const { count, error } = await supabase
-        .from('spaces')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', userId);
-
-      if (error) throw error;
-
-      if ((count || 0) > 0) {
-        return {
-          ok: false,
-          error: 'Refusing to overwrite cloud with empty local data'
-        };
-      }
-    }
+// Manual sync is a full cloud snapshot overwrite.
 
     const now = new Date().toISOString();
 
@@ -385,6 +384,10 @@ ipcMain.handle('cloud:push', async (event, payload = {}) => {
       updated_at: now
     }));
 
+    await deleteCloudRowsNotIn('edges', userId, edgeRows.map(row => row.local_id));
+await deleteCloudRowsNotIn('nodes', userId, nodeRows.map(row => row.local_id));
+await deleteCloudRowsNotIn('spaces', userId, spaceRows.map(row => row.local_id));
+    
     if (edgeRows.length) {
       const { error } = await supabase
         .from('edges')

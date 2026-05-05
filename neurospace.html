@@ -59,18 +59,18 @@
         <div class="hub-logo brand-logo"><span class="brand-mark"></span><span>Linkor</span></div>
         <span id="app-version" class="hub-version">v...</span>
         <div class="hub-spacer"></div>
-        <button class="hub-nav-btn plan" onclick="openSubscriptionModal()">Plans</button>
-        <button class="hub-nav-btn" onclick="syncCurrentUserToSupabase()">Sync</button>
-        <button class="hub-nav-btn" onclick="loadCurrentUserFromSupabase()">Load Cloud</button>
-        <div class="sync-status local" id="sync-status" title="Cloud sync status">Local only</div>
-        <button class="hub-nav-btn locked" onclick="openFriendsLocked()">Friends</button>
-        <button class="hub-nav-btn" onclick="showPage('settings')" data-tour="about-system">Settings</button>
-        <div class="hub-user">
-            <div class="hub-avatar" id="hub-avatar">NS</div>
-            <span class="hub-username" id="hub-username">NeuroPilot</span>
-        </div>
-        <button class="hub-logout-btn" onclick="doLogout()">ВЫЙТИ</button>
-        <button class="hub-power-btn" onclick="quitAppSafely()" title="&#x417;&#x430;&#x43a;&#x440;&#x438;&#x442;&#x438; &#x43f;&#x440;&#x43e;&#x433;&#x440;&#x430;&#x43c;&#x443;" aria-label="&#x417;&#x430;&#x43a;&#x440;&#x438;&#x442;&#x438; &#x43f;&#x440;&#x43e;&#x433;&#x440;&#x430;&#x43c;&#x443;">&#x23FB;</button>
+        <button class="hub-nav-btn plan advanced-only" onclick="openSubscriptionModal()">Plans</button>
+<a class="hub-nav-btn hub-telegram-btn" href="https://t.me/LinkorLab" target="_blank" rel="noopener noreferrer">Telegram</a>
+<button class="hub-nav-btn advanced-only" onclick="syncCurrentUserToSupabase()">Sync</button>
+<button class="hub-nav-btn advanced-only" onclick="loadCurrentUserFromSupabase()">Load Cloud</button>
+<div class="sync-status local advanced-only" id="sync-status" title="Cloud sync status">Local only</div>
+<button class="hub-nav-btn locked advanced-only" onclick="openFriendsLocked()">Friends</button>
+<button class="hub-nav-btn" onclick="showPage('settings')" data-tour="about-system">Settings</button>
+
+<div class="hub-user" onclick="openProfileModal()">
+    <div class="hub-avatar" id="hub-avatar">NS</div>
+    <span class="hub-username" id="hub-username">NeuroPilot</span>
+</div>
     </div>
     <div class="hub-body">
         <div class="hub-header">
@@ -94,9 +94,10 @@
 <div id="engine" class="page">
     <div class="engine-sidebar">
         <div class="engine-sidebar-top">
-            <button class="engine-back-btn" onclick="showPage('hub')">←</button>
-            <div class="engine-space-name" id="engine-space-name">Пространство</div>
-        </div>
+    <button class="engine-back-btn" onclick="showPage('hub')">←</button>
+    <div class="engine-space-name" id="engine-space-name">Простір</div>
+    <button id="advanced-mode-toggle" class="advanced-mode-toggle" onclick="toggleAdvancedMode()" title="Базовий / розширений режим">Basic</button>
+</div>
 
         <div class="engine-sidebar-search">
             <input type="text" placeholder="🔍 Поиск узлов..." id="node-search" oninput="searchNodes()">
@@ -142,7 +143,7 @@
                         <button class="tool-btn" id="tool-cut" onclick="setTool('cut')">
                             <span class="tool-btn-icon">⟋</span> Разрезать связь
                         </button>
-                        <button class="tool-btn" id="btn-duplicate" onclick="duplicateSelectedNode()" data-plan="plus">
+                        <button class="tool-btn advanced only" id="btn-duplicate" onclick="duplicateSelectedNode()" data-plan="plus">
                             <span class="tool-btn-icon">⧉</span> Дублировать <span class="plan-badge">PLUS</span>
                         </button>
                         <button class="tool-btn" onclick="deleteSelected()" id="delete-btn" style="color:var(--accent2);display:none">
@@ -152,7 +153,7 @@
                 </div>
             </div>
 
-            <div class="engine-group" data-group="organize">
+            <div class="engine-group advanced-only" data-group="organize">
                 <button class="engine-group-head" onclick="toggleSidebarSection('organize')">
                     <span class="engine-group-arrow">▼</span><span class="engine-group-icon">⛶</span><span class="engine-group-label">ORGANIZE</span>
                 </button>
@@ -185,17 +186,15 @@
                     <div class="engine-sidebar-section">
                         <div class="view-mode-stack">
                             <button class="view-mode-btn active" data-view="graph" onclick="setViewMode('graph')">Graph</button>
-                            <button class="view-mode-btn" data-view="list" onclick="setViewMode('list')">List</button>
-                            <button class="view-mode-btn" data-view="timeline" onclick="setViewMode('timeline')">Timeline</button>
-                            <button class="view-mode-btn" data-view="focus" onclick="setViewMode('focus')">Focus</button>
-                        </div>
+                            <button class="view-mode-btn advanced-only" data-view="list" onclick="setViewMode('list')">List</button>
+<button class="view-mode-btn advanced-only" data-view="timeline" onclick="setViewMode('timeline')">Timeline</button>
+<button class="view-mode-btn advanced-only" data-view="focus" onclick="setViewMode('focus')">Focus</button> </div>
                         <div class="canvas-controls sidebar">
                             <button class="canvas-ctrl-btn" onclick="zoom(1.2)">＋</button>
                             <div class="canvas-zoom-label" id="zoom-label">100%</div>
                             <button class="canvas-ctrl-btn" onclick="zoom(0.8)">－</button>
                             <button class="canvas-ctrl-btn" onclick="fitView()" style="font-size:12px">⊡</button>
-                            <button class="canvas-ctrl-btn" id="snap-grid-toggle" onclick="toggleSnapGrid()">⌗</button>
-                        </div>
+                            <button class="canvas-ctrl-btn advanced-only" id="snap-grid-toggle" onclick="toggleSnapGrid()">⌗</button>                       </div>
                         <button class="tool-btn hotkeys-help-btn" onclick="showHotkeysHelp()">
                             <span class="tool-btn-icon">⌘</span> Hotkeys
                         </button>
@@ -203,7 +202,7 @@
                 </div>
             </div>
 
-            <div class="engine-group" data-group="history">
+            <div class="engine-group advanced-only" data-group="history">
                 <button class="engine-group-head" onclick="toggleSidebarSection('history')">
                     <span class="engine-group-arrow">▼</span><span class="engine-group-icon">↺</span><span class="engine-group-label">HISTORY</span>
                 </button>
@@ -275,13 +274,13 @@
         <div class="selection-box" id="selection-box" style="display:none"></div>
 
         <div class="connect-mode-indicator" id="connect-indicator">
-            ⚡ РЕЖИМ СВЯЗИ — Выберите целевой узел
-        </div>
+    ⚡ РЕЖИМ ЗВʼЯЗКУ — вибери цільовий вузол
+</div>
 
-        <div class="smart-connect-progress" id="smart-connect-progress" style="display:none">
-            <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-            <div class="progress-text" id="progress-text">Анализ узлов...</div>
-        </div>
+<div class="smart-connect-progress" id="smart-connect-progress" style="display:none">
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="progress-text" id="progress-text">Аналіз вузлів...</div>
+</div>
 
         <div class="canvas-minimap" id="canvas-minimap">
             <div class="canvas-minimap-world" id="minimap-world"></div>
@@ -289,9 +288,9 @@
         </div>
             <!-- AI панель -->
             <div class="ai-panel" id="ai-panel">
-                <div class="node-editor-title">// AI Ассистент</div>
-                     <button class="editor-close-btn" onclick="toggleAIPanel()" style="margin-bottom:16px;">× ЗАКРЫТЬ</button>
-                <textarea id="ai-prompt-input" class="ai-prompt-input" placeholder="Describe what you want to think through..."></textarea>
+                <div class="node-editor-title">// AI помічник</div>
+<button class="editor-close-btn" onclick="toggleAIPanel()" style="margin-bottom:16px;">× Закрити</button>
+<textarea id="ai-prompt-input" class="ai-prompt-input" placeholder="Опиши думку, ціль або ідею..."></textarea>
                 <div class="ai-dev-note">
     ⚠️ AI-помічник у розробці. Зараз Linkor використовує розумні заготовки для найпоширеніших сценаріїв.
 </div>
@@ -311,41 +310,64 @@
     <button id="ai-generate-btn" class="ai-generate-main" onclick="handleAIGenerate('panel')">
         🧠 Згенерувати вузли
     </button>
+</div><div class="ai-response" id="ai-response-content">
+    Напиши ідею і натисни “Згенерувати вузли”.
 </div>
-                <div class="ai-response" id="ai-response-content">
-        Нажмите кнопку 🧠 AI в боковой панели для анализа.
-         </div>
 </div>
         <div class="node-editor" id="node-editor">
-            <div class="node-editor-title">// Редактор узла</div>
-            <div class="editor-field">
-                <label class="editor-label">Заголовок</label>
-                <input class="editor-input" type="text" id="editor-title" placeholder="Название мысли...">
-            </div>
-            <div class="editor-field">
-                <label class="editor-label">Описание</label>
-                <textarea class="editor-textarea" id="editor-desc" placeholder="Подробное описание..."></textarea>
-            </div>
-            <div class="editor-field">
-                <label class="editor-label">Теги (через запятую)</label>
-                <input class="editor-input" type="text" id="editor-tags" placeholder="идея, проект, важно">
-                <div class="tag-suggestions" id="tag-suggestions"></div>
-            </div>
-            <div class="editor-field">
-                <label class="editor-label">Тип узла</label>
-                <select class="editor-input" id="editor-type"></select>
-            </div>
-            <div class="editor-field">
-                <label class="editor-label">Цвет</label>
-                <div class="color-swatches" id="color-swatches"></div>
-            </div>
-            <div class="editor-field">
-                <label class="editor-label">Связанные узлы</label>
-                <div id="editor-connections" class="editor-connections"></div>
-            </div>
-            <button class="editor-save-btn" onclick="saveNodeEdit()"><span>💾 СОХРАНИТЬ</span></button>
-            <button class="editor-close-btn" onclick="closeNodeEditor()">× ЗАКРЫТЬ</button>
+    <div class="node-editor-title">// Редактор вузла</div>
+
+    <div class="editor-field">
+        <label class="editor-label">Заголовок</label>
+        <input class="editor-input" type="text" id="editor-title" placeholder="Назва думки...">
+    </div>
+
+    <div class="editor-field">
+        <label class="editor-label">Опис</label>
+        <textarea class="editor-textarea" id="editor-desc" placeholder="Детальний опис..."></textarea>
+    </div>
+
+    <div class="editor-field editor-tags-field">
+        <label class="editor-label">Теги</label>
+
+        <div class="editor-tags-box">
+            <div id="editor-tags-chips" class="editor-tags-chips"></div>
+            <input class="editor-input editor-tags-input" type="text" id="editor-tags" placeholder="Напиши тег і натисни Enter">
         </div>
+
+        <div class="tag-suggestions" id="tag-suggestions"></div>
+        <div class="editor-field-hint">Enter — додати тег. Клік по тегу — видалити.</div>
+    </div>
+        <div class="editor-field">
+    <label class="editor-label-static">Статус</label>
+    <select class="editor-input" id="editor-status">
+        <option value="none">Без статусу</option>
+        <option value="progress">В роботі</option>
+        <option value="done">Виконано</option>
+    </select>
+        </div>
+    <div class="editor-field">
+        <label class="editor-label">Тип вузла</label>
+        <select class="editor-input" id="editor-type"></select>
+    </div>
+
+    <div class="editor-field">
+        <label class="editor-label">Колір</label>
+        <div class="color-swatches" id="color-swatches"></div>
+    </div>
+
+    <div class="editor-field">
+        <label class="editor-label">Повʼязані вузли</label>
+        <div id="editor-connections" class="editor-connections"></div>
+    </div>
+
+    <button class="editor-save-btn" onclick="saveNodeEdit()">
+        <span>💾 Зберегти</span>
+    </button>
+
+    <button class="editor-close-btn" onclick="closeNodeEditor()">× Закрити</button>
+</div>
+            
     </div>
 </div>
 
