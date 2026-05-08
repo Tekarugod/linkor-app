@@ -9,11 +9,13 @@ let updateCheckInProgress = false;
 let updateStatusState = null;
 let localChangelogCache = null;
 let hubUpdateDetailsOpen = false;
-const MIN_ZOOM = 0.35;
-const MAX_ZOOM = 2.5;
-const WHEEL_ZOOM_SPEED = 0.0012;
+const MIN_ZOOM = 0.3;
+const MAX_ZOOM = 3;
+const WHEEL_ZOOM_SPEED = 0.001;
 let wheelZoomAnchor = null;
 let wheelZoomAnchorTimer = null;
+let miniMapState = null;
+let miniMapDragging = false;
 let spacePanning = false;
 let aiThinkingInProgress = false;
 let aiThinkingInterval = null;
@@ -71,12 +73,18 @@ const NODE_COLORS = [
 const EMOJIS = ['🧠','⚡','🌐','🔮','💡','🚀','🔬','🎯','🌊','🔥','💎','🌌','📊','🎨'];
 const COLORS = ['#00f5ff','#ff006e','#7b2fff','#00ff88','#ff9500','#ff3366','#00bfff','#ff6b00','#ffe600'];
 const NODE_TYPES = {
+  text: { label: 'Text', short: 'TXT', color: '#00f5ff', icon: 'T' },
+  checklist: { label: 'Checklist', short: 'CHK', color: '#00ff88', icon: '☑' },
+  link: { label: 'Link', short: 'URL', color: '#38d9ff', icon: '↗' },
+  code: { label: 'Code', short: 'CODE', color: '#ffd166', icon: '</>' },
+  note: { label: 'Note', short: 'NOTE', color: '#f4a261', icon: '✦' },
   idea: { label: 'Idea', short: 'ID', color: '#00f5ff' },
   task: { label: 'Task', short: 'TK', color: '#00ff88' },
   question: { label: 'Question', short: 'Q', color: '#ffe600' },
   resource: { label: 'Resource', short: 'RS', color: '#00bfff' },
   decision: { label: 'Decision', short: 'DC', color: '#ff006e' },
-  subtopic: { label: 'Subtopic', short: 'SUB', color: '#8bf3ff' }
+  subtopic: { label: 'Subtopic', short: 'SUB', color: '#8bf3ff' },
+  focus: { label: 'Focus', short: 'FOC', color: '#ffd166' }
 };
 const NODE_STATUSES = {
   none: { label: 'Без статусу', short: '○', className: 'none' },
@@ -93,11 +101,79 @@ function getNextNodeStatus(status) {
   if (status === 'progress') return 'done';
   return 'none';
 }
+
+const FOCUS_STATUS_CONFIG = {
+  planned: { label: 'Заплановано', className: 'planned' },
+  in_progress: { label: 'В процесі', className: 'in-progress' },
+  done: { label: 'Виконано', className: 'done' }
+};
+
+function getFocusStatusConfig(status) {
+  return FOCUS_STATUS_CONFIG[status] || FOCUS_STATUS_CONFIG.planned;
+}
+
+function normalizeFocusTasks(node) {
+  if (!node || node.type !== 'focus') return [];
+  const source = Array.isArray(node.focusTasks) && node.focusTasks.length
+    ? node.focusTasks
+    : (Array.isArray(node.focusChecklist) ? node.focusChecklist : []);
+
+  node.focusTasks = source.map((item, index) => {
+    if (typeof item === 'string') {
+      return { id: `ft_${Date.now()}_${index}`, text: item, status: 'none' };
+    }
+    return {
+      id: item.id || `ft_${Date.now()}_${index}`,
+      text: item.text || item.title || `Пункт ${index + 1}`,
+      status: ['none', 'progress', 'done'].includes(item.status) ? item.status : 'none'
+    };
+  });
+
+  if (!node.focusTasks.length) {
+    node.focusTasks = ['Почати роботу', 'Розбити задачу на кроки', 'Позначити перший результат']
+      .map((text, index) => ({ id: `ft_${Date.now()}_${index}`, text, status: 'none' }));
+  }
+
+  node.focusStatus = ['planned', 'in_progress', 'done'].includes(node.focusStatus) ? node.focusStatus : 'planned';
+  node.focusBadges = Array.isArray(node.focusBadges) && node.focusBadges.length ? node.focusBadges : ['Фокус', 'Пріоритет'];
+  return node.focusTasks;
+}
+
+function refreshFocusNode(nodeId) {
+  const node = state.nodes[nodeId];
+  const el = document.getElementById('node-' + nodeId);
+  if (!node || !el) return;
+  el.replaceWith(createNodeEl(node));
+}
+
 const SPACE_TEMPLATES = {
   blank: {
     name: 'Blank',
     desc: 'Clean space with no starter nodes.',
     nodes: [],
+    edges: []
+  },
+  focus: {
+    name: 'Focus Mode',
+    desc: 'Premium central task card with checklist and statuses.',
+    nodes: [
+      {
+        title: 'Головна задача',
+        desc: 'Опиши, на чому потрібно сфокусуватись',
+        type: 'focus',
+        x: 360,
+        y: 220,
+        colorIdx: 0,
+        tags: 'Фокус, Пріоритет',
+        focusStatus: 'planned',
+        focusTasks: [
+          { id: 'ft_start', text: 'Почати роботу', status: 'none' },
+          { id: 'ft_steps', text: 'Розбити задачу на кроки', status: 'none' },
+          { id: 'ft_result', text: 'Позначити перший результат', status: 'none' }
+        ],
+        focusBadges: ['Фокус', 'Пріоритет']
+      }
+    ],
     edges: []
   },
   project: {
@@ -160,6 +236,24 @@ const SPACE_TEMPLATES = {
 const SPACE_TEMPLATE_I18N = {
   en: {},
   uk: {
+    focus: {
+      name: 'Focus Mode',
+      desc: 'Центральний focus-блок із головною задачею, чеклістом і статусами.',
+      nodes: [
+        {
+          title: 'Головна задача',
+          desc: 'Опиши, на чому потрібно сфокусуватись',
+          tags: 'Фокус, Пріоритет',
+          focusStatus: 'planned',
+          focusTasks: [
+            { id: 'ft_start', text: 'Почати роботу', status: 'none' },
+            { id: 'ft_steps', text: 'Розбити задачу на кроки', status: 'none' },
+            { id: 'ft_result', text: 'Позначити перший результат', status: 'none' }
+          ],
+          focusBadges: ['Фокус', 'Пріоритет']
+        }
+      ]
+    },
     blank: { name: 'Порожній', desc: 'Чистий простір без стартових вузлів.', nodes: [] },
     project: {
       name: 'Проєкт',
@@ -604,7 +698,7 @@ I18N.ru = {
   focusHint: 'Выберите узел, чтобы сфокусировать его кластер.'
 };
 
-const TYPE_I18N_KEYS = { idea: 'typeIdea', task: 'typeTask', question: 'typeQuestion', resource: 'typeResource', decision: 'typeDecision' };
+const TYPE_I18N_KEYS = { idea: 'typeIdea', task: 'typeTask', question: 'typeQuestion', resource: 'typeResource', decision: 'typeDecision', text: 'Текст', checklist: 'Чекліст', link: 'Посилання', code: 'Код', note: 'Нотатка' };
 
 function tr(key, vars = {}) {
   const dict = I18N[state.language] || I18N.uk;
@@ -616,7 +710,8 @@ function tr(key, vars = {}) {
 }
 
 function typeLabel(typeId) {
-  return tr(TYPE_I18N_KEYS[typeId] || 'typeIdea');
+  const key = TYPE_I18N_KEYS[typeId];
+  return key && I18N.en[key] ? tr(key) : (key || NODE_TYPES[typeId]?.label || tr('typeIdea'));
 }
 
 function currentLang() {
@@ -750,7 +845,7 @@ function loadState() {
       state.spaces = saved.spaces || [];
       state.nodes = saved.nodes || {};
       state.edges = saved.edges || {};
-      state.theme = saved.theme || 'cyber';
+      state.theme = saved.theme || localStorage.getItem('linkorTheme') || 'cyber';
       state.accentColor = saved.accentColor || '#00f5ff';
       state.language = saved.language || 'uk';
       state.subscriptionPlan = saved.subscriptionPlan || 'basic';
@@ -1405,12 +1500,16 @@ function setActiveSidebarGroup(section) {
 function applyAdvancedMode() {
   document.body.classList.toggle('advanced-mode', isAdvancedMode);
 
-  const btn = document.getElementById('advanced-mode-toggle');
-  if (btn) {
+  const modeButtons = [
+    document.getElementById('advanced-mode-toggle'),
+    document.getElementById('hub-advanced-mode-toggle')
+  ].filter(Boolean);
+
+  modeButtons.forEach(btn => {
     btn.textContent = isAdvancedMode ? 'Advanced' : 'Basic';
     btn.classList.toggle('active', isAdvancedMode);
     btn.title = isAdvancedMode ? 'Увімкнено розширений режим' : 'Увімкнено базовий режим';
-  }
+  });
 
   if (!isAdvancedMode) {
     if (['cut'].includes(state.tool)) setTool('select');
@@ -1455,37 +1554,46 @@ function renderMiniMap() {
   world.innerHTML = '';
   if (!nodes.length) {
     viewport.style.display = 'none';
+    miniMapState = null;
     return;
   }
-  const minX = Math.min(...nodes.map(n => n.x));
-  const minY = Math.min(...nodes.map(n => n.y));
-  const maxX = Math.max(...nodes.map(n => n.x + NODE_FALLBACK_SIZE.width));
-  const maxY = Math.max(...nodes.map(n => n.y + NODE_FALLBACK_SIZE.height));
-  const width = Math.max(1, maxX - minX);
-  const height = Math.max(1, maxY - minY);
-  const sx = 180 / width;
-  const sy = 120 / height;
+  const bounds = getGraphBounds(nodes);
+  const mapRect = map.getBoundingClientRect();
+  const pad = 10;
+  const sx = (mapRect.width - pad * 2) / bounds.width;
+  const sy = (mapRect.height - pad * 2) / bounds.height;
+  const scale = Math.min(sx, sy);
+  const offsetX = (mapRect.width - bounds.width * scale) / 2;
+  const offsetY = (mapRect.height - bounds.height * scale) / 2;
+  miniMapState = { bounds, scale, offsetX, offsetY, width: mapRect.width, height: mapRect.height };
   const edgeLayer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   edgeLayer.setAttribute('class', 'minimap-edges');
-  edgeLayer.setAttribute('viewBox', '0 0 180 120');
+  edgeLayer.setAttribute('viewBox', `0 0 ${mapRect.width} ${mapRect.height}`);
   getSpaceEdges().forEach(edge => {
     normalizeEdge(edge);
     const fromNode = state.nodes[getEdgeSourceId(edge)];
     const toNode = state.nodes[getEdgeTargetId(edge)];
     if (!fromNode || !toNode) return;
+    const fs = getNodeVisualSize(fromNode);
+    const ts = getNodeVisualSize(toNode);
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', (fromNode.x + NODE_FALLBACK_SIZE.width / 2 - minX) * sx);
-    line.setAttribute('y1', (fromNode.y + NODE_FALLBACK_SIZE.height / 2 - minY) * sy);
-    line.setAttribute('x2', (toNode.x + NODE_FALLBACK_SIZE.width / 2 - minX) * sx);
-    line.setAttribute('y2', (toNode.y + NODE_FALLBACK_SIZE.height / 2 - minY) * sy);
+    line.setAttribute('x1', offsetX + (fromNode.x + fs.width / 2 - bounds.minX) * scale);
+    line.setAttribute('y1', offsetY + (fromNode.y + fs.height / 2 - bounds.minY) * scale);
+    line.setAttribute('x2', offsetX + (toNode.x + ts.width / 2 - bounds.minX) * scale);
+    line.setAttribute('y2', offsetY + (toNode.y + ts.height / 2 - bounds.minY) * scale);
     edgeLayer.appendChild(line);
   });
   world.appendChild(edgeLayer);
   nodes.forEach(node => {
     const dot = document.createElement('div');
-    dot.className = 'minimap-node' + (node.type === 'subtopic' ? ' subtopic' : '');
-    dot.style.left = `${(node.x - minX) * sx}px`;
-    dot.style.top = `${(node.y - minY) * sy}px`;
+    const type = NODE_TYPES[node.type] || NODE_TYPES.text;
+    const size = getNodeVisualSize(node);
+    dot.className = `minimap-node minimap-${node.type || 'text'}`;
+    dot.style.left = `${offsetX + (node.x - bounds.minX) * scale}px`;
+    dot.style.top = `${offsetY + (node.y - bounds.minY) * scale}px`;
+    dot.style.width = `${Math.max(node.type === 'focus' ? 14 : 7, size.width * scale)}px`;
+    dot.style.height = `${Math.max(node.type === 'focus' ? 9 : 5, size.height * scale)}px`;
+    dot.style.background = type.color || 'var(--accent)';
     world.appendChild(dot);
   });
   const rect = wrap.getBoundingClientRect();
@@ -1494,10 +1602,25 @@ function renderMiniMap() {
   const visibleWidth = rect.width / state.view.scale;
   const visibleHeight = rect.height / state.view.scale;
   viewport.style.display = '';
-  viewport.style.left = `${(visibleLeft - minX) * sx}px`;
-  viewport.style.top = `${(visibleTop - minY) * sy}px`;
-  viewport.style.width = `${Math.max(8, visibleWidth * sx)}px`;
-  viewport.style.height = `${Math.max(8, visibleHeight * sy)}px`;
+  viewport.style.left = `${offsetX + (visibleLeft - bounds.minX) * scale}px`;
+  viewport.style.top = `${offsetY + (visibleTop - bounds.minY) * scale}px`;
+  viewport.style.width = `${Math.max(8, visibleWidth * scale)}px`;
+  viewport.style.height = `${Math.max(8, visibleHeight * scale)}px`;
+}
+
+function moveViewFromMiniMap(clientX, clientY) {
+  const map = document.getElementById('canvas-minimap');
+  const wrap = document.getElementById('canvas-wrap');
+  if (!map || !wrap || !miniMapState) return;
+  const rect = map.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  const worldX = miniMapState.bounds.minX + (x - miniMapState.offsetX) / miniMapState.scale;
+  const worldY = miniMapState.bounds.minY + (y - miniMapState.offsetY) / miniMapState.scale;
+  const wrapRect = wrap.getBoundingClientRect();
+  state.view.x = wrapRect.width / 2 - worldX * state.view.scale;
+  state.view.y = wrapRect.height / 2 - worldY * state.view.scale;
+  applyView();
 }
 
 // ===== AUTH =====
@@ -2200,7 +2323,11 @@ function createTemplateContent(spaceId, templateId) {
       desc: node.desc || '',
       tags: node.tags || '',
       colorIdx: node.colorIdx || 0,
-      type: node.type || 'idea'
+      type: node.type || 'idea',
+      focusChecklist: node.focusChecklist || null,
+      focusStatus: node.focusStatus || null,
+      focusTasks: node.focusTasks ? JSON.parse(JSON.stringify(node.focusTasks)) : null,
+      focusBadges: node.focusBadges || null
     };
   });
   template.edges.forEach(([fromIdx, toIdx]) => {
@@ -2301,6 +2428,9 @@ function normalizeEdge(edge) {
 
 function normalizeGraphData() {
   Object.values(state.edges || {}).forEach(normalizeEdge);
+  Object.values(state.nodes || {}).forEach(node => {
+    if (node?.type === 'focus') normalizeFocusTasks(node);
+  });
 }
 
 function createEdgeRecord(id, spaceId, sourceId, targetId, sourceAnchor = DEFAULT_EDGE_SOURCE_ANCHOR, targetAnchor = DEFAULT_EDGE_TARGET_ANCHOR) {
@@ -2323,6 +2453,15 @@ function getNodeSize(nodeId) {
     width: el.offsetWidth || NODE_FALLBACK_SIZE.width,
     height: el.offsetHeight || NODE_FALLBACK_SIZE.height
   };
+}
+
+function getNodeVisualSize(node) {
+  const size = getNodeSize(node.id);
+  if (size.width !== NODE_FALLBACK_SIZE.width || size.height !== NODE_FALLBACK_SIZE.height) return size;
+  if (node.type === 'focus') return { width: 380, height: 260 };
+  if (node.type === 'note') return { width: 260, height: 170 };
+  if (node.type === 'code') return { width: 280, height: 180 };
+  return { width: 210, height: 120 };
 }
 
 function getAnchorPoint(nodeId, anchor = DEFAULT_EDGE_SOURCE_ANCHOR) {
@@ -2515,7 +2654,48 @@ function createNodeEl(node) {
   div.style.borderColor = colorSet.dot;
   if (getSelectedNodeIds().includes(node.id)) div.classList.add('selected');
   const tagsHtml = node.tags ? node.tags.split(',').map(t => `<span class="node-tag">${escHtml(t.trim())}</span>`).join('') : '';
-  div.innerHTML = `
+  if (node.type === 'focus') {
+    const focusTasks = normalizeFocusTasks(node);
+    const focusStatus = getFocusStatusConfig(node.focusStatus);
+    div.classList.add('focus-node');
+    div.classList.add(`focus-state-${focusStatus.className}`);
+    const checklist = focusTasks.map(task => `
+      <li class="focus-task focus-task-${task.status}">
+        <button class="focus-check focus-interactive" onclick="toggleFocusTaskStatus(event,'${node.id}','${task.id}')" title="Змінити статус пункту"></button>
+        <span class="focus-task-text">${escHtml(task.text)}</span>
+        <span class="focus-task-actions">
+          <button class="focus-task-action focus-interactive" onclick="editFocusTask(event,'${node.id}','${task.id}')" title="Редагувати">✎</button>
+          <button class="focus-task-action danger focus-interactive" onclick="deleteFocusTask(event,'${node.id}','${task.id}')" title="Видалити">×</button>
+        </span>
+      </li>
+    `).join('');
+    const statuses = Object.entries(FOCUS_STATUS_CONFIG)
+      .map(([id, item]) => `<button class="focus-status focus-interactive ${node.focusStatus === id ? 'active' : ''}" onclick="setFocusBlockStatus(event,'${node.id}','${id}')">${escHtml(item.label)}</button>`).join('');
+    const badges = (node.focusBadges?.length ? node.focusBadges : ['Фокус', 'Пріоритет'])
+      .map(item => `<span class="focus-badge">${escHtml(item)}</span>`).join('');
+    div.innerHTML = `
+      <div class="node-anchor-layer">${anchorsHtml}</div>
+      <div class="focus-card-top">
+        <div>
+          <div class="focus-kicker">FOCUS MODE</div>
+          <div class="focus-title">${escHtml(node.title || 'Головна задача')}</div>
+        </div>
+      </div>
+      <div class="focus-desc">${escHtml(node.desc || 'Опиши, на чому потрібно сфокусуватись')}</div>
+      <div class="focus-badges">${badges}</div>
+      <ul class="focus-checklist">${checklist}</ul>
+      <div class="focus-statuses">${statuses}</div>
+      <button class="focus-add-task focus-interactive" onclick="addFocusTask(event,'${node.id}')">+ Додати пункт</button>
+      <div class="node-actions">
+        <button class="node-action-btn" onclick="editNode(event,'${node.id}')">${tr('edit')}</button>
+        <button class="node-action-btn" onclick="addSubnode(event,'${node.id}')" data-tour="subtopic-button">${tr('subnode')}</button>
+        <button class="node-action-btn" onclick="startConnect('${node.id}','right',event)">${tr('addLink')}</button>
+        <button class="node-action-btn danger" onclick="deleteNode(event,'${node.id}')">${tr('del')}</button>
+      </div>
+    `;
+  } else {
+    const specialHtml = renderSpecialNodeBody(node, type);
+    div.innerHTML = `
     <div class="node-anchor-layer">${anchorsHtml}</div>
     <div class="node-header">
   <div class="node-dot" style="background:${colorSet.dot};box-shadow:0 0 8px ${colorSet.dot}"></div>
@@ -2523,8 +2703,8 @@ function createNodeEl(node) {
   <button class="node-status node-status-${status.className}" onclick="toggleNodeStatus(event,'${node.id}')" title="${escAttr(status.label)}">${status.short}</button>
   <div class="node-type" style="border-color:${type.color};color:${type.color}" title="${escAttr(typeLabel(node.type || 'idea'))}">${type.short}</div>
 </div>
-    ${node.desc ? `<div class="node-desc">${escHtml(node.desc)}</div>` : ''}
-    ${tagsHtml ? `<div class="node-tags">${tagsHtml}</div>` : ''}
+    ${specialHtml || (node.desc ? `<div class="node-desc">${escHtml(node.desc)}</div>` : '')}
+    ${tagsHtml && !['link', 'code'].includes(node.type) ? `<div class="node-tags">${tagsHtml}</div>` : ''}
     <div class="node-actions">
       <button class="node-action-btn" onclick="editNode(event,'${node.id}')">${tr('edit')}</button>
       <button class="node-action-btn" onclick="addSubnode(event,'${node.id}')" data-tour="subtopic-button">${tr('subnode')}</button>
@@ -2532,7 +2712,11 @@ function createNodeEl(node) {
       <button class="node-action-btn danger" onclick="deleteNode(event,'${node.id}')">${tr('del')}</button>
     </div>
   `;
+  }
   div.addEventListener('mousedown', (e) => onNodeMouseDown(e, node.id));
+  div.querySelectorAll('.focus-interactive, .node-check, .node-inline-add, .node-link-open').forEach(el => {
+    el.addEventListener('mousedown', event => event.stopPropagation());
+  });
   div.querySelectorAll('.node-anchor').forEach(anchorEl => {
     anchorEl.addEventListener('mousedown', (e) => {
       e.preventDefault();
@@ -2563,6 +2747,174 @@ function createNodeEl(node) {
     });
   });
   return div;
+}
+
+function getNodeUrl(node) {
+  const raw = (node.url || node.desc || '').trim();
+  try {
+    const url = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+    return url.hostname.includes('.') ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+function renderSpecialNodeBody(node, type) {
+  if (node.type === 'checklist') {
+    const items = (Array.isArray(node.checklist) && node.checklist.length ? node.checklist : (node.desc || 'Новий пункт').split('\n'))
+      .map((item, index) => typeof item === 'string' ? { text: item, done: false, id: `ci_${index}` } : item)
+      .filter(item => String(item.text || '').trim());
+    node.checklist = items;
+    return `<ul class="node-checklist">${items.map(item => `
+      <li class="${item.done ? 'done' : ''}">
+        <button class="node-check ${item.done ? 'done' : ''}" onclick="toggleChecklistItem(event,'${node.id}','${escAttr(item.id)}')"></button>
+        <span>${escHtml(item.text)}</span>
+      </li>`).join('')}</ul>
+      <button class="node-inline-add" onclick="addChecklistItem(event,'${node.id}')">+ Додати пункт</button>`;
+  }
+  if (node.type === 'link') {
+    const url = getNodeUrl(node);
+    const host = url ? new URL(url).hostname.replace(/^www\./, '') : 'Некоректне посилання';
+    return `<div class="node-link-card">
+      <div class="node-link-icon">↗</div>
+      <div><div class="node-link-host">${escHtml(host)}</div><div class="node-link-url">${escHtml(node.desc || node.url || '')}</div></div>
+      <button class="node-link-open" onclick="openNodeLink(event,'${node.id}')" ${url ? '' : 'disabled'}>Відкрити</button>
+    </div>`;
+  }
+  if (node.type === 'code') {
+    return `<pre class="node-code"><code>${escHtml(node.desc || '// Код')}</code></pre>`;
+  }
+  if (node.type === 'note') {
+    return `<div class="node-note">${escHtml(node.desc || 'Нотатка').replace(/\n/g, '<br>')}</div>`;
+  }
+  if (node.type === 'text') {
+    return node.desc ? `<div class="node-desc">${escHtml(node.desc)}</div>` : '';
+  }
+  return '';
+}
+
+function toggleChecklistItem(event, nodeId, itemId) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const node = state.nodes[nodeId];
+  if (!node || node.type !== 'checklist') return;
+  const item = (node.checklist || []).find(entry => entry.id === itemId);
+  if (!item) return;
+  item.done = !item.done;
+  saveState();
+  refreshNode(nodeId);
+}
+
+function addChecklistItem(event, nodeId) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const node = state.nodes[nodeId];
+  if (!node || node.type !== 'checklist') return;
+  node.checklist = Array.isArray(node.checklist) ? node.checklist : [];
+  node.checklist.push({ id: `ci_${Date.now()}`, text: 'Новий пункт', done: false });
+  saveState();
+  refreshNode(nodeId);
+}
+
+function openNodeLink(event, nodeId) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const url = getNodeUrl(state.nodes[nodeId]);
+  if (url) window.nodusBridge?.openExternal?.(url);
+}
+
+function refreshNode(nodeId) {
+  const node = state.nodes[nodeId];
+  const el = document.getElementById('node-' + nodeId);
+  if (node && el) el.replaceWith(createNodeEl(node));
+}
+
+function setFocusBlockStatus(event, nodeId, status) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const node = state.nodes[nodeId];
+  if (!node || node.type !== 'focus' || !FOCUS_STATUS_CONFIG[status]) return;
+  node.focusStatus = status;
+  saveState();
+  refreshFocusNode(nodeId);
+  if (state.selectedNodeId === nodeId) renderFocusEditor(node);
+}
+
+function getNextFocusTaskStatus(status) {
+  if (!status || status === 'none') return 'progress';
+  if (status === 'progress') return 'done';
+  return 'none';
+}
+
+function toggleFocusTaskStatus(event, nodeId, taskId) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const node = state.nodes[nodeId];
+  if (!node || node.type !== 'focus') return;
+  const task = normalizeFocusTasks(node).find(item => item.id === taskId);
+  if (!task) return;
+  task.status = getNextFocusTaskStatus(task.status);
+  saveState();
+  refreshFocusNode(nodeId);
+  if (state.selectedNodeId === nodeId) renderFocusEditor(node);
+}
+
+function editFocusTask(event, nodeId, taskId) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const node = state.nodes[nodeId];
+  if (!node || node.type !== 'focus') return;
+  const task = normalizeFocusTasks(node).find(item => item.id === taskId);
+  if (!task) return;
+  const row = event?.target?.closest?.('.focus-task');
+  const textEl = row?.querySelector?.('.focus-task-text');
+  if (!row || !textEl) return;
+  const input = document.createElement('input');
+  input.className = 'focus-task-inline-input focus-interactive';
+  input.value = task.text;
+  textEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  const commit = () => {
+    const text = input.value.trim();
+    if (text) task.text = text;
+    saveState();
+    refreshFocusNode(nodeId);
+    if (state.selectedNodeId === nodeId) renderFocusEditor(node);
+  };
+
+  input.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Enter') commit();
+    if (e.key === 'Escape') refreshFocusNode(nodeId);
+  });
+  input.addEventListener('blur', commit, { once: true });
+}
+
+function deleteFocusTask(event, nodeId, taskId) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const node = state.nodes[nodeId];
+  if (!node || node.type !== 'focus') return;
+  node.focusTasks = normalizeFocusTasks(node).filter(item => item.id !== taskId);
+  saveState();
+  refreshFocusNode(nodeId);
+  if (state.selectedNodeId === nodeId) renderFocusEditor(node);
+}
+
+function addFocusTask(event, nodeId, text = 'Новий пункт') {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const node = state.nodes[nodeId];
+  if (!node || node.type !== 'focus') return;
+  const tasks = normalizeFocusTasks(node);
+  const id = `ft_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  tasks.push({ id, text, status: 'none' });
+  saveState();
+  refreshFocusNode(nodeId);
+  if (state.selectedNodeId === nodeId) renderFocusEditor(node);
+  return id;
 }
 
 function renderEdges() {
@@ -2719,6 +3071,31 @@ function clampZoom(scale) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
 }
 
+function animateViewTo(nextView, duration = 220) {
+  const start = { ...state.view };
+  const startTime = performance.now();
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  function frame(now) {
+    const p = Math.min(1, (now - startTime) / duration);
+    const k = ease(p);
+    state.view.x = start.x + (nextView.x - start.x) * k;
+    state.view.y = start.y + (nextView.y - start.y) * k;
+    state.view.scale = start.scale + (nextView.scale - start.scale) * k;
+    applyView();
+    if (p < 1) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+function getGraphBounds(nodes = getSpaceNodes()) {
+  if (!nodes.length) return null;
+  const minX = Math.min(...nodes.map(n => n.x));
+  const minY = Math.min(...nodes.map(n => n.y));
+  const maxX = Math.max(...nodes.map(n => n.x + getNodeVisualSize(n).width));
+  const maxY = Math.max(...nodes.map(n => n.y + getNodeVisualSize(n).height));
+  return { minX, minY, maxX, maxY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
+}
+
 function getCanvasCenterPoint() {
   const wrap = document.getElementById('canvas-wrap');
   if (!wrap) return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
@@ -2813,23 +3190,35 @@ function zoomFromWheelStable(e) {
 
 function fitView() {
   const nodes = getSpaceNodes();
-  if (!nodes.length) { state.view = {x:60,y:60,scale:1}; applyView(); return; }
+  if (!nodes.length) { animateViewTo({x:60,y:60,scale:1}); return; }
   const wrap = document.getElementById('canvas-wrap');
   if (!wrap) return;
   const rect = wrap.getBoundingClientRect();
-  const minX = Math.min(...nodes.map(n=>n.x));
-  const maxX = Math.max(...nodes.map(n=>n.x)) + 160;
-  const minY = Math.min(...nodes.map(n=>n.y));
-  const maxY = Math.max(...nodes.map(n=>n.y)) + 60;
-  const w = maxX - minX;
-  const h = maxY - minY;
-  const scaleX = (rect.width - 80) / w;
-  const scaleY = (rect.height - 80) / h;
-  const scale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(1.5, scaleX, scaleY)));
-  state.view.scale = scale;
-  state.view.x = (rect.width - w * scale) / 2 - minX * scale;
-  state.view.y = (rect.height - h * scale) / 2 - minY * scale;
-  applyView();
+  const bounds = getGraphBounds(nodes);
+  if (!bounds) return;
+  const padding = 140;
+  const scaleX = (rect.width - padding) / bounds.width;
+  const scaleY = (rect.height - padding) / bounds.height;
+  const scale = clampZoom(Math.min(1.25, scaleX, scaleY));
+  animateViewTo({
+    scale,
+    x: (rect.width - bounds.width * scale) / 2 - bounds.minX * scale,
+    y: (rect.height - bounds.height * scale) / 2 - bounds.minY * scale
+  });
+}
+
+function centerSelectedNode() {
+  const node = state.nodes[state.selectedNodeId];
+  const wrap = document.getElementById('canvas-wrap');
+  if (!node || !wrap) return;
+  const rect = wrap.getBoundingClientRect();
+  const size = getNodeVisualSize(node);
+  const scale = clampZoom(Math.max(0.75, Math.min(1.5, state.view.scale || 1)));
+  animateViewTo({
+    scale,
+    x: rect.width / 2 - (node.x + size.width / 2) * scale,
+    y: rect.height / 2 - (node.y + size.height / 2) * scale
+  });
 }
 
 // ===== TOOLS =====
@@ -2879,7 +3268,7 @@ function createNode(x, y, title, desc, colorIdx, type = 'idea', options = {}) {
   tags: '',
   status: 'none',
   colorIdx: colorIdx || 0,
-  type
+  type: type === 'idea' ? 'text' : type
 };
   applyOnboardingNodePosition(state.nodes[id]);
   if (!options.skipSave) saveState();
@@ -3744,6 +4133,88 @@ function closeRightPanels(exceptId = null) {
 
   if (exceptId !== 'node-editor') hideTagSuggestions?.();
 }
+
+function renderFocusEditor(node) {
+  const panel = document.getElementById('focus-editor-panel');
+  if (!panel) return;
+  if (!node || node.type !== 'focus') {
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+    return;
+  }
+
+  const tasks = normalizeFocusTasks(node);
+  panel.style.display = '';
+  panel.innerHTML = `
+    <label class="editor-label-static">Focus Mode</label>
+    <div class="focus-editor-statuses">
+      ${Object.entries(FOCUS_STATUS_CONFIG).map(([id, item]) => `
+        <button type="button" class="focus-editor-status ${node.focusStatus === id ? 'active' : ''}" onclick="setFocusEditorStatus('${id}')">${escHtml(item.label)}</button>
+      `).join('')}
+    </div>
+    <div class="focus-editor-list">
+      ${tasks.map(task => `
+        <div class="focus-editor-task" data-task-id="${escAttr(task.id)}">
+          <select class="focus-editor-task-status" onchange="updateFocusEditorTaskStatus('${escAttr(task.id)}', this.value)">
+            <option value="none" ${task.status === 'none' ? 'selected' : ''}>Без статусу</option>
+            <option value="progress" ${task.status === 'progress' ? 'selected' : ''}>В роботі</option>
+            <option value="done" ${task.status === 'done' ? 'selected' : ''}>Виконано</option>
+          </select>
+          <input class="editor-input focus-editor-task-input" value="${escAttr(task.text)}" oninput="updateFocusEditorTaskText('${escAttr(task.id)}', this.value)">
+          <button type="button" class="focus-editor-task-remove" onclick="removeFocusEditorTask('${escAttr(task.id)}')">×</button>
+        </div>
+      `).join('')}
+    </div>
+    <button type="button" class="focus-editor-add" onclick="addFocusEditorTask()">+ Додати пункт</button>
+  `;
+}
+
+function getEditingFocusNode() {
+  const node = state.nodes[state.selectedNodeId];
+  return node?.type === 'focus' ? node : null;
+}
+
+function setFocusEditorStatus(status) {
+  const node = getEditingFocusNode();
+  if (!node || !FOCUS_STATUS_CONFIG[status]) return;
+  node.focusStatus = status;
+  renderFocusEditor(node);
+}
+
+function updateFocusEditorTaskText(taskId, text) {
+  const node = getEditingFocusNode();
+  if (!node) return;
+  const task = normalizeFocusTasks(node).find(item => item.id === taskId);
+  if (task) task.text = text;
+}
+
+function updateFocusEditorTaskStatus(taskId, status) {
+  const node = getEditingFocusNode();
+  if (!node) return;
+  const task = normalizeFocusTasks(node).find(item => item.id === taskId);
+  if (task) task.status = ['none', 'progress', 'done'].includes(status) ? status : 'none';
+}
+
+function removeFocusEditorTask(taskId) {
+  const node = getEditingFocusNode();
+  if (!node) return;
+  node.focusTasks = normalizeFocusTasks(node).filter(item => item.id !== taskId);
+  renderFocusEditor(node);
+}
+
+function addFocusEditorTask() {
+  const node = getEditingFocusNode();
+  if (!node) return;
+  const id = `ft_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  normalizeFocusTasks(node).push({ id, text: 'Новий пункт', status: 'none' });
+  renderFocusEditor(node);
+  requestAnimationFrame(() => {
+    const input = document.querySelector(`.focus-editor-task[data-task-id="${id}"] .focus-editor-task-input`);
+    input?.focus();
+    input?.select?.();
+  });
+}
+
 function editNode(e, nodeId) {
   e.stopPropagation();
   selectNode(nodeId);
@@ -3767,6 +4238,7 @@ if (statusSelect) {
       .join('');
     typeSelect.value = node.type || 'idea';
   }
+  renderFocusEditor(node);
   document.querySelectorAll('.color-swatch').forEach(s => {
     s.classList.toggle('active', parseInt(s.dataset.idx) === (node.colorIdx || 0));
   });
@@ -3817,10 +4289,28 @@ editorTagDraft = dedupeTags(editorTagDraft);
 node.tags = editorTagDraft.join(', ');
 node.status = document.getElementById('editor-status')?.value || 'none';
 node.type = document.getElementById('editor-type')?.value || 'idea';
+if (node.type === 'focus') {
+  node.focusTasks = normalizeFocusTasks(node)
+    .map(task => ({ ...task, text: (task.text || '').trim() }))
+    .filter(task => task.text);
+  node.focusStatus = FOCUS_STATUS_CONFIG[node.focusStatus] ? node.focusStatus : 'planned';
+} else if (node.type === 'checklist' && (!Array.isArray(node.checklist) || !node.checklist.length)) {
+  node.checklist = (node.desc || 'Новий пункт').split('\n')
+    .filter(Boolean)
+    .map((text, index) => ({ id: `ci_${Date.now()}_${index}`, text, done: false }));
+} else if (node.type === 'link') {
+  node.url = node.desc || node.url || '';
+}
   const activeColor = document.querySelector('.color-swatch.active');
   if (activeColor) node.colorIdx = parseInt(activeColor.dataset.idx);
   saveState();
   const el = document.getElementById('node-' + node.id);
+  if (el && node.type === 'focus') {
+    el.replaceWith(createNodeEl(node));
+    closeNodeEditor();
+    showToast(`✓ ${tr('save')}`);
+    return;
+  }
   if (el) {
     const titleEl = el.querySelector('.node-title');
     if (titleEl) titleEl.textContent = node.title;
@@ -4091,6 +4581,447 @@ function exportSpaceJSON() {
   showToast(`✓ ${tr('export')}`);
 }
 
+function getExportNodes(selectedOnly = false) {
+  const selected = getSelectedNodeIds();
+  const nodes = getSpaceNodes();
+  return selectedOnly && selected.size ? nodes.filter(node => selected.has(node.id)) : nodes;
+}
+
+function getExportTheme() {
+  const styles = getComputedStyle(document.documentElement);
+  const themeName = document.documentElement.dataset.theme || 'midnight';
+  const read = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
+  const light = themeName === 'paper' || themeName === 'cream';
+  return {
+    light,
+    bg: read('--bg', light ? '#f3efe7' : '#050912'),
+    bg2: read('--bg2', light ? '#ebe4d7' : '#0b1422'),
+    text: read('--text', light ? '#1b2733' : '#e8f7ff'),
+    textDim: read('--text-dim', light ? '#617080' : '#93aabb'),
+    accent: read('--accent', '#00f5ff'),
+    border: light ? 'rgba(53,66,80,0.18)' : 'rgba(128,227,255,0.2)',
+    card: light ? 'rgba(255,252,246,0.94)' : 'rgba(8,20,38,0.96)',
+    card2: light ? 'rgba(255,255,255,0.72)' : 'rgba(4,10,22,0.78)',
+    shadow: light ? 'rgba(55,47,35,0.16)' : 'rgba(0,0,0,0.36)',
+    grid: light ? 'rgba(76,92,108,0.13)' : 'rgba(128,225,255,0.11)',
+    gridStrong: light ? 'rgba(76,92,108,0.2)' : 'rgba(128,225,255,0.18)'
+  };
+}
+
+function splitCanvasToken(ctx, token, maxWidth) {
+  const pieces = [];
+  let rest = String(token || '');
+  while (rest && ctx.measureText(rest).width > maxWidth) {
+    let lo = 1;
+    let hi = rest.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (ctx.measureText(rest.slice(0, mid)).width <= maxWidth) lo = mid;
+      else hi = mid - 1;
+    }
+    pieces.push(rest.slice(0, Math.max(1, lo)));
+    rest = rest.slice(Math.max(1, lo));
+  }
+  if (rest) pieces.push(rest);
+  return pieces;
+}
+
+function wrapCanvasText(ctx, text, maxWidth, maxLines = 4) {
+  const lines = [];
+  String(text || '').split(/\r?\n/).forEach(rawLine => {
+    const tokens = rawLine.trim() ? rawLine.trim().split(/\s+/) : [''];
+    let current = '';
+    tokens.forEach(token => {
+      splitCanvasToken(ctx, token, maxWidth).forEach(piece => {
+        const candidate = current ? `${current} ${piece}` : piece;
+        if (!current || ctx.measureText(candidate).width <= maxWidth) {
+          current = candidate;
+        } else {
+          lines.push(current);
+          current = piece;
+        }
+      });
+    });
+    if (current || !rawLine.trim()) lines.push(current);
+  });
+  if (lines.length > maxLines) {
+    const clipped = lines.slice(0, maxLines);
+    clipped[clipped.length - 1] = clipped[clipped.length - 1].replace(/\s*$/, '') + '...';
+    return clipped;
+  }
+  return lines;
+}
+
+function ellipsizeCanvasText(ctx, text, maxWidth) {
+  const value = String(text || '');
+  if (ctx.measureText(value).width <= maxWidth) return value;
+  let lo = 0;
+  let hi = value.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (ctx.measureText(value.slice(0, mid) + '...').width <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  return value.slice(0, lo) + '...';
+}
+
+function drawExportText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+  const lines = wrapCanvasText(ctx, text, maxWidth, maxLines);
+  lines.forEach((line, index) => ctx.fillText(line, x, y + index * lineHeight));
+  return y + Math.max(lines.length, 1) * lineHeight;
+}
+
+function drawExportPill(ctx, label, x, y, color, theme) {
+  ctx.font = '700 10px "Share Tech Mono", monospace';
+  const text = String(label || '');
+  const width = Math.min(ctx.measureText(text).width + 18, 118);
+  ctx.fillStyle = `${color}22`;
+  ctx.strokeStyle = `${color}88`;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(x, y, width, 22, 11);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.fillText(ellipsizeCanvasText(ctx, text, width - 14), x + 9, y + 14);
+  return width;
+}
+
+function drawExportGrid(ctx, width, height, ox, oy, bounds, theme) {
+  const startX = ((ox + bounds.minX) % 36) - 36;
+  const startY = ((oy + bounds.minY) % 36) - 36;
+  ctx.save();
+  ctx.lineWidth = 1;
+  for (let x = startX; x < width; x += 36) {
+    ctx.strokeStyle = Math.abs(Math.round(x - startX) % 180) < 1 ? theme.gridStrong : theme.grid;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+  }
+  for (let y = startY; y < height; y += 36) {
+    ctx.strokeStyle = Math.abs(Math.round(y - startY) % 180) < 1 ? theme.gridStrong : theme.grid;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawExportConnections(ctx, nodes, ox, oy, theme) {
+  const nodeSet = new Set(nodes.map(node => node.id));
+  getSpaceEdges().forEach(edge => {
+    const source = state.nodes[getEdgeSourceId(edge)];
+    const target = state.nodes[getEdgeTargetId(edge)];
+    if (!source || !target || !nodeSet.has(source.id) || !nodeSet.has(target.id)) return;
+    const sourceSize = getNodeVisualSize(source);
+    const targetSize = getNodeVisualSize(target);
+    const sx = source.x + ox + sourceSize.width / 2;
+    const sy = source.y + oy + sourceSize.height / 2;
+    const tx = target.x + ox + targetSize.width / 2;
+    const ty = target.y + oy + targetSize.height / 2;
+    const tension = Math.max(60, Math.min(180, Math.abs(tx - sx) * 0.45));
+    ctx.save();
+    ctx.strokeStyle = theme.light ? 'rgba(41,95,128,0.34)' : 'rgba(128,225,255,0.3)';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = theme.light ? 'rgba(41,95,128,0.08)' : 'rgba(0,245,255,0.18)';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.bezierCurveTo(sx + tension, sy, tx - tension, ty, tx, ty);
+    ctx.stroke();
+    ctx.restore();
+  });
+}
+
+function getExportAccent(node) {
+  if (node.type === 'focus') {
+    if (node.focusStatus === 'done') return '#38e58a';
+    if (node.focusStatus === 'in_progress') return '#38d9ff';
+    return '#ffd166';
+  }
+  const colorSet = NODE_COLORS[node.colorIdx || 0];
+  const type = NODE_TYPES[node.type || 'idea'] || NODE_TYPES.idea;
+  return colorSet?.dot || type.color || '#00f5ff';
+}
+
+function drawExportHeader(ctx, node, x, y, width, accent, theme) {
+  const type = NODE_TYPES[node.type || 'idea'] || NODE_TYPES.idea;
+  ctx.fillStyle = accent;
+  ctx.beginPath();
+  ctx.arc(x + 16, y + 18, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = theme.text;
+  ctx.font = '800 15px Orbitron, sans-serif';
+  ctx.fillText(ellipsizeCanvasText(ctx, node.title || 'Вузол', width - 86), x + 28, y + 23);
+  ctx.font = '700 9px "Share Tech Mono", monospace';
+  const badgeWidth = Math.max(34, ctx.measureText(type.short || 'TXT').width + 13);
+  ctx.strokeStyle = accent;
+  ctx.fillStyle = theme.light ? `${accent}18` : 'rgba(0,0,0,0.24)';
+  ctx.beginPath();
+  ctx.roundRect(x + width - badgeWidth - 14, y + 8, badgeWidth, 20, 6);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = accent;
+  ctx.fillText(type.short || 'TXT', x + width - badgeWidth - 7, y + 22);
+}
+
+function drawExportChecklist(ctx, node, x, y, width, theme, accent) {
+  const items = Array.isArray(node.checklist) && node.checklist.length ? node.checklist : [];
+  ctx.font = '600 12px Rajdhani, sans-serif';
+  let cy = y;
+  items.slice(0, 4).forEach(item => {
+    const done = typeof item === 'object' && !!item.done;
+    const text = typeof item === 'string' ? item : (item.text || item.title || '');
+    ctx.strokeStyle = done ? '#38e58a' : accent;
+    ctx.fillStyle = done ? '#38e58a' : 'transparent';
+    ctx.beginPath();
+    ctx.roundRect(x, cy - 11, 14, 14, 4);
+    ctx.fill();
+    ctx.stroke();
+    if (done) {
+      ctx.fillStyle = theme.light ? '#0d2b1b' : '#04140c';
+      ctx.font = '900 10px Arial, sans-serif';
+      ctx.fillText('✓', x + 3, cy);
+      ctx.font = '600 12px Rajdhani, sans-serif';
+    }
+    ctx.fillStyle = done ? theme.textDim : theme.text;
+    const lines = wrapCanvasText(ctx, text, width - 24, 2);
+    lines.forEach((line, lineIndex) => ctx.fillText(line, x + 24, cy + lineIndex * 14));
+    cy += Math.max(20, lines.length * 14 + 5);
+  });
+  if (items.length > 4) {
+    ctx.fillStyle = theme.textDim;
+    ctx.fillText(`+${items.length - 4}`, x + 24, cy);
+  }
+}
+
+function drawExportFocusNode(ctx, node, x, y, size, theme) {
+  normalizeFocusTasks(node);
+  const accent = getExportAccent(node);
+  const grad = ctx.createLinearGradient(x, y, x + size.width, y + size.height);
+  grad.addColorStop(0, theme.light ? `${accent}20` : 'rgba(18,31,52,0.98)');
+  grad.addColorStop(1, theme.light ? 'rgba(255,255,255,0.92)' : 'rgba(4,8,18,0.98)');
+  ctx.save();
+  ctx.shadowColor = theme.light ? `${accent}24` : `${accent}44`;
+  ctx.shadowBlur = 30;
+  ctx.fillStyle = grad;
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.roundRect(x, y, size.width, size.height, 16);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.stroke();
+  ctx.fillStyle = accent;
+  ctx.font = '800 10px "Share Tech Mono", monospace';
+  ctx.fillText('FOCUS MODE', x + 22, y + 30);
+  ctx.fillStyle = theme.light ? '#1f242d' : '#fff7d6';
+  ctx.font = '900 20px Orbitron, sans-serif';
+  ctx.fillText(ellipsizeCanvasText(ctx, node.title || 'Головна задача', size.width - 44), x + 22, y + 58);
+  ctx.fillStyle = theme.textDim;
+  ctx.font = '600 13px Rajdhani, sans-serif';
+  let cy = drawExportText(ctx, node.desc || 'Опиши, на чому потрібно сфокусуватись', x + 22, y + 84, size.width - 44, 17, 3) + 8;
+  (node.focusBadges || ['Фокус', 'Пріоритет']).slice(0, 3).reduce((px, badge) => px + drawExportPill(ctx, badge, px, cy, accent, theme) + 7, x + 22);
+  cy += 42;
+  ctx.font = '600 12px Rajdhani, sans-serif';
+  node.focusTasks.slice(0, 4).forEach(task => {
+    const status = task.status || 'none';
+    const taskColor = status === 'done' ? '#38e58a' : (status === 'progress' ? '#38d9ff' : accent);
+    ctx.strokeStyle = taskColor;
+    ctx.fillStyle = status === 'done' ? '#38e58a' : (status === 'progress' ? 'rgba(56,217,255,0.45)' : 'transparent');
+    ctx.beginPath();
+    ctx.roundRect(x + 22, cy - 12, 16, 16, 5);
+    ctx.fill();
+    ctx.stroke();
+    if (status === 'done') {
+      ctx.fillStyle = theme.light ? '#092112' : '#061018';
+      ctx.font = '900 11px Arial, sans-serif';
+      ctx.fillText('✓', x + 26, cy);
+      ctx.font = '600 12px Rajdhani, sans-serif';
+    }
+    ctx.fillStyle = status === 'done' ? theme.textDim : theme.text;
+    const lines = wrapCanvasText(ctx, task.text || '', size.width - 70, 2);
+    lines.forEach((line, index) => ctx.fillText(line, x + 48, cy + index * 15));
+    cy += Math.max(24, lines.length * 15 + 7);
+  });
+  const labels = [['planned', 'Заплановано'], ['in_progress', 'В процесі'], ['done', 'Виконано']];
+  const buttonY = y + size.height - 38;
+  let px = x + 22;
+  labels.forEach(([id, label]) => {
+    const active = (node.focusStatus || 'planned') === id;
+    const statusColor = id === 'done' ? '#38e58a' : (id === 'in_progress' ? '#38d9ff' : '#ffd166');
+    ctx.font = '700 10px "Share Tech Mono", monospace';
+    const bw = ctx.measureText(label).width + 18;
+    ctx.fillStyle = active ? `${statusColor}28` : (theme.light ? 'rgba(255,255,255,0.52)' : 'rgba(255,255,255,0.05)');
+    ctx.strokeStyle = active ? statusColor : theme.border;
+    ctx.beginPath();
+    ctx.roundRect(px, buttonY, bw, 24, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = active ? statusColor : theme.textDim;
+    ctx.fillText(label, px + 9, buttonY + 16);
+    px += bw + 8;
+  });
+  ctx.restore();
+}
+
+function drawExportNode(ctx, node, ox, oy, theme) {
+  const size = getNodeVisualSize(node);
+  const x = node.x + ox;
+  const y = node.y + oy;
+  if (node.type === 'focus') {
+    drawExportFocusNode(ctx, node, x, y, size, theme);
+    return;
+  }
+  const accent = getExportAccent(node);
+  ctx.save();
+  ctx.shadowColor = theme.shadow;
+  ctx.shadowBlur = 20;
+  ctx.fillStyle = theme.card;
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.roundRect(x, y, size.width, size.height, 10);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.stroke();
+  drawExportHeader(ctx, node, x + 12, y + 10, size.width - 24, accent, theme);
+  let cy = y + 58;
+  const contentX = x + 16;
+  const contentW = size.width - 32;
+  ctx.font = '600 13px Rajdhani, sans-serif';
+  ctx.fillStyle = theme.textDim;
+  if (node.type === 'checklist') {
+    drawExportChecklist(ctx, node, contentX, cy + 2, contentW, theme, accent);
+  } else if (node.type === 'link') {
+    const url = getNodeUrl(node);
+    ctx.fillStyle = theme.card2;
+    ctx.strokeStyle = theme.border;
+    ctx.beginPath();
+    ctx.roundRect(contentX, cy - 8, contentW, 64, 9);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = accent;
+    ctx.font = '800 18px Arial, sans-serif';
+    ctx.fillText('↗', contentX + 13, cy + 24);
+    ctx.fillStyle = theme.text;
+    ctx.font = '800 13px Rajdhani, sans-serif';
+    ctx.fillText(ellipsizeCanvasText(ctx, node.title || 'Посилання', contentW - 56), contentX + 46, cy + 15);
+    ctx.fillStyle = theme.textDim;
+    ctx.font = '600 11px Rajdhani, sans-serif';
+    ctx.fillText(ellipsizeCanvasText(ctx, url || node.desc || '', contentW - 56), contentX + 46, cy + 34);
+  } else if (node.type === 'code') {
+    ctx.fillStyle = theme.light ? '#18212d' : 'rgba(0,0,0,0.42)';
+    ctx.strokeStyle = theme.light ? 'rgba(24,33,45,0.14)' : 'rgba(255,255,255,0.08)';
+    ctx.beginPath();
+    ctx.roundRect(contentX, cy - 8, contentW, Math.min(118, size.height - 78), 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#d6f7ff';
+    ctx.font = '500 11px "Share Tech Mono", monospace';
+    drawExportText(ctx, node.desc || node.code || '', contentX + 10, cy + 10, contentW - 20, 15, 6);
+  } else if (node.type === 'note') {
+    ctx.fillStyle = theme.text;
+    ctx.font = '600 15px Rajdhani, sans-serif';
+    drawExportText(ctx, node.desc || '', contentX, cy, contentW, 19, 6);
+  } else {
+    drawExportText(ctx, node.desc || node.tags || '', contentX, cy, contentW, 17, 4);
+    if (node.tags) {
+      const tags = String(node.tags).split(',').map(item => item.trim()).filter(Boolean).slice(0, 3);
+      let px = contentX;
+      const py = y + size.height - 34;
+      tags.forEach(tag => { px += drawExportPill(ctx, tag, px, py, accent, theme) + 6; });
+    }
+  }
+  ctx.restore();
+}
+
+function drawExportWatermark(ctx, width, height, theme) {
+  const text = 'Made with Linkor';
+  const boxWidth = 176;
+  const boxHeight = 34;
+  const x = width - boxWidth - 28;
+  const y = height - boxHeight - 18;
+  ctx.save();
+  ctx.fillStyle = theme.light ? 'rgba(255,255,255,0.76)' : 'rgba(4,10,22,0.72)';
+  ctx.strokeStyle = theme.light ? 'rgba(53,66,80,0.16)' : 'rgba(128,227,255,0.18)';
+  ctx.beginPath();
+  ctx.roundRect(x, y, boxWidth, boxHeight, 17);
+  ctx.fill();
+  ctx.stroke();
+  const mark = ctx.createLinearGradient(x + 12, y + 8, x + 28, y + 24);
+  mark.addColorStop(0, theme.accent);
+  mark.addColorStop(1, '#ff006e');
+  ctx.fillStyle = mark;
+  ctx.beginPath();
+  ctx.roundRect(x + 13, y + 9, 16, 16, 5);
+  ctx.fill();
+  ctx.fillStyle = theme.text;
+  ctx.font = '800 13px Rajdhani, sans-serif';
+  ctx.fillText(text, x + 38, y + 22);
+  ctx.restore();
+}
+
+async function renderExportCanvas(selectedOnly = false) {
+  const nodes = getExportNodes(selectedOnly);
+  if (!nodes.length) throw new Error('Немає вузлів для експорту');
+  const bounds = getGraphBounds(nodes);
+  const padding = 110;
+  const watermarkSpace = 72;
+  const theme = getExportTheme();
+  const canvas = document.createElement('canvas');
+  const pixelRatio = 2;
+  const logicalWidth = Math.max(720, bounds.width + padding * 2);
+  const logicalHeight = Math.max(460, bounds.height + padding * 2 + watermarkSpace);
+  const maxSide = 12000;
+  const exportScale = Math.min(1, maxSide / Math.max(logicalWidth, logicalHeight));
+  canvas.width = Math.ceil(logicalWidth * pixelRatio * exportScale);
+  canvas.height = Math.ceil(logicalHeight * pixelRatio * exportScale);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(pixelRatio * exportScale, pixelRatio * exportScale);
+  const w = logicalWidth;
+  const h = logicalHeight;
+  const bg = ctx.createLinearGradient(0, 0, w, h);
+  bg.addColorStop(0, theme.bg2);
+  bg.addColorStop(1, theme.bg);
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+  const ox = padding - bounds.minX;
+  const oy = padding - bounds.minY;
+
+  drawExportGrid(ctx, w, h, ox, oy, bounds, theme);
+  drawExportConnections(ctx, nodes, ox, oy, theme);
+  nodes.forEach(node => drawExportNode(ctx, node, ox, oy, theme));
+  drawExportWatermark(ctx, w, h, theme);
+  return canvas;
+}
+
+async function exportSpacePNG(selectedOnly = getSelectedNodeIds().size > 0) {
+  try {
+    const canvas = await renderExportCanvas(selectedOnly);
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = `linkor-${Date.now()}.png`;
+    a.click();
+    showToast('PNG експортовано');
+  } catch (error) {
+    showToast(`Експорт не вдався: ${error.message}`);
+  }
+}
+
+async function copySpaceImage() {
+  try {
+    const canvas = await renderExportCanvas(getSelectedNodeIds().size > 0);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    showToast('Зображення скопійовано');
+  } catch (error) {
+    showToast(`Копіювання не вдалось: ${error.message}`);
+  }
+}
+
 function importSpaceJSON() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -4161,11 +5092,17 @@ function renderSettings(tab) {
         <div class="settings-note">${tr('languageSub')}</div>
       </div>
       <div class="settings-group">
-        <div class="settings-group-title">${tr('theme')}</div>
+        <div class="settings-group-title">Тема інтерфейсу</div>
         <div class="theme-cards">
-          <div class="theme-card ${state.theme==='cyber'?'active':''}" onclick="applyTheme('cyber')"><div class="theme-card-preview" style="background:#040810"><div class="theme-card-bar" style="background:#00f5ff;width:80%"></div><div class="theme-card-bar" style="background:rgba(0,245,255,0.3);width:60%"></div></div><div class="theme-card-label">CYBER</div></div>
-          <div class="theme-card ${state.theme==='glass'?'active':''}" onclick="applyTheme('glass')"><div class="theme-card-preview" style="background:linear-gradient(135deg,#1a1040,#0a1530)"><div class="theme-card-bar" style="background:rgba(255,255,255,0.6);width:80%"></div><div class="theme-card-bar" style="background:rgba(255,255,255,0.3);width:60%"></div></div><div class="theme-card-label">GLASS</div></div>
-          <div class="theme-card ${state.theme==='neon'?'active':''}" onclick="applyTheme('neon')"><div class="theme-card-preview" style="background:#0a000f"><div class="theme-card-bar" style="background:#ff006e;width:80%"></div><div class="theme-card-bar" style="background:#7b2fff;width:60%"></div></div><div class="theme-card-label">NEON</div></div>
+          ${Object.entries(LINKOR_THEMES).map(([id, theme]) => `
+            <div class="theme-card ${state.theme===id?'active':''}" data-theme="${id}" onclick="applyTheme('${id}')">
+              <div class="theme-card-preview" style="background:${theme.bg}">
+                <div class="theme-card-bar" style="background:${theme.accent};width:80%"></div>
+                <div class="theme-card-bar" style="background:${theme.accent3};width:60%"></div>
+              </div>
+              <div class="theme-card-label">${theme.label}</div>
+            </div>
+          `).join('')}
         </div>
       </div>
       <div class="settings-group">
@@ -4264,24 +5201,39 @@ function setLanguage(language) {
   showToast(`✓ ${tr('languageChanged')}`);
 }
 
+const LINKOR_THEMES = {
+  midnight: { label: 'Midnight', bg: '#040810', bg2: '#080f1a', bg3: '#0d1829', accent: '#8bd3ff', accent2: '#ff5d8f', accent3: '#8f7cff', text: '#d7ecff', textDim: '#7894aa', node: '#0d2040' },
+  aurora: { label: 'Aurora', bg: '#07120f', bg2: '#0d1d21', bg3: '#132a34', accent: '#64ffda', accent2: '#ff6b9a', accent3: '#a78bfa', text: '#dcfff7', textDim: '#7da59d', node: '#10312f' },
+  cyber: { label: 'Cyber', bg: '#040810', bg2: '#080f1a', bg3: '#0d1829', accent: '#00f5ff', accent2: '#ff006e', accent3: '#7b2fff', text: '#c8e8ff', textDim: '#5a7a9a', node: '#0d2040' },
+  paper: { label: 'Paper', bg: '#edf1f7', bg2: '#e3e9f2', bg3: '#f8fafc', accent: '#315d8c', accent2: '#9f4f5f', accent3: '#64748b', text: '#1f2937', textDim: '#64748b', node: '#f8fafc' },
+  cream: { label: 'Cream', bg: '#efe4d2', bg2: '#e4d3ba', bg3: '#fbf4e8', accent: '#8a5a2b', accent2: '#9f4a3f', accent3: '#5f7252', text: '#2d241c', textDim: '#766653', node: '#fff7ea' },
+  neon: { label: 'Neon', bg: '#0a000f', bg2: '#100015', bg3: '#170022', accent: '#ff2bd6', accent2: '#00f5ff', accent3: '#ffe600', text: '#ffeaff', textDim: '#a575a8', node: '#1b0624' },
+};
+
 function applyTheme(theme, silent = false) {
-  state.theme = theme;
+  const themeId = LINKOR_THEMES[theme] ? theme : 'cyber';
+  state.theme = themeId;
+  localStorage.setItem('linkorTheme', themeId);
   saveState({ markUnsynced: !silent });
-  const themes = {
-    cyber: { bg: '#040810', bg2: '#080f1a', bg3: '#0d1829' },
-    glass: { bg: '#0d0a20', bg2: '#120f2a', bg3: '#171330' },
-    neon: { bg: '#0a000f', bg2: '#100015', bg3: '#150020' },
-  };
-  const t = themes[theme];
-  if (t) {
-    document.documentElement.style.setProperty('--bg', t.bg);
-    document.documentElement.style.setProperty('--bg2', t.bg2);
-    document.documentElement.style.setProperty('--bg3', t.bg3);
-  }
+  const t = LINKOR_THEMES[themeId];
+  document.documentElement.dataset.theme = themeId;
+  document.documentElement.style.setProperty('--bg', t.bg);
+  document.documentElement.style.setProperty('--bg2', t.bg2);
+  document.documentElement.style.setProperty('--bg3', t.bg3);
+  document.documentElement.style.setProperty('--accent', t.accent);
+  document.documentElement.style.setProperty('--accent2', t.accent2);
+  document.documentElement.style.setProperty('--accent3', t.accent3);
+  document.documentElement.style.setProperty('--text', t.text);
+  document.documentElement.style.setProperty('--text-dim', t.textDim);
+  document.documentElement.style.setProperty('--node-default', t.node);
+  document.documentElement.style.setProperty('--node-border', t.accent);
+  document.documentElement.style.setProperty('--border', `rgba(${hexToRgb(t.accent)},0.22)`);
+  document.documentElement.style.setProperty('--glass', `rgba(${hexToRgb(t.accent)},0.06)`);
+  document.documentElement.style.setProperty('--glass2', `rgba(${hexToRgb(t.accent)},0.11)`);
   document.querySelectorAll('.theme-card').forEach(el => {
-    el.classList.toggle('active', el.querySelector('.theme-card-label')?.textContent.toLowerCase() === theme);
+    el.classList.toggle('active', el.dataset.theme === themeId || el.querySelector('.theme-card-label')?.textContent.toLowerCase() === themeId);
   });
-  if (!silent) showToast(`✓ ${tr('themeChanged')}: ${theme.toUpperCase()}`);
+  if (!silent) showToast(`✓ ${tr('themeChanged')}: ${t.label}`);
 }
 
 function applyAccent(color) {
@@ -6160,10 +7112,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (state.theme) applyTheme(state.theme, true);
   applyStaticTranslations();
 
-  await Promise.race([
-  restoreAuthOnStartup(),
-  new Promise(resolve => setTimeout(resolve, 2500))
-]);
+  await restoreAuthOnStartup();
 
   applyStaticTranslations();
 
@@ -6190,6 +7139,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Клик по профилю в хабе
   const hubUser = document.querySelector('.hub-user');
   if (hubUser) hubUser.addEventListener('click', openProfileModal);
+
+  const miniMap = document.getElementById('canvas-minimap');
+  if (miniMap) {
+    miniMap.addEventListener('mousedown', e => {
+      e.preventDefault();
+      miniMapDragging = true;
+      moveViewFromMiniMap(e.clientX, e.clientY);
+    });
+  }
 
   const quickInput = document.getElementById('quick-capture-input');
   if (quickInput) {
@@ -6325,6 +7283,7 @@ document.getElementById('ai-response-content')?.addEventListener('wheel', (e) =>
   });
 
   document.addEventListener('mousemove', (e) => {
+    if (miniMapDragging) moveViewFromMiniMap(e.clientX, e.clientY);
     if (state.selecting) updateSelectionBox(e);
     if (state.cutting) updateCutting(e);
     if (state.panning) {
@@ -6335,6 +7294,7 @@ document.getElementById('ai-response-content')?.addEventListener('wheel', (e) =>
     if (state.connectSource) updateTempEdge(e);
   });
   document.addEventListener('mouseup', (e) => {
+  miniMapDragging = false;
   handleOnboardingConnectionMouseUp(e);
   if (state.selecting) finishSelectionBox();
   if (state.cutting) finishCutting();
@@ -6511,16 +7471,16 @@ function setSyncStatus(status = 'local', message = '') {
   if (!el) return;
 
   const labels = {
-    local: 'Local only',
-    unsynced: 'Unsynced',
-    syncing: 'Syncing...',
-    synced: 'Synced',
-    failed: 'Sync failed'
+    local: 'Локально',
+    unsynced: 'Не синхронізовано',
+    syncing: 'Синхронізація...',
+    synced: 'Синхронізовано',
+    failed: 'Помилка синхронізації'
   };
 
   el.className = `sync-status ${status}`;
   el.textContent = labels[status] || labels.local;
-  const proHint = state.subscriptionPlan === 'pro' ? 'Auto sync: Pro enabled' : 'Auto sync доступний у Pro';
+  const proHint = state.subscriptionPlan === 'pro' ? 'Автосинхронізація увімкнена' : 'Автосинхронізація доступна у Pro';
   el.title = message ? `${message} · ${proHint}` : proHint;
 }
 

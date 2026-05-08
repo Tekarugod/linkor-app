@@ -59,13 +59,16 @@
         <div class="hub-logo brand-logo"><span class="brand-mark"></span><span>Linkor</span></div>
         <span id="app-version" class="hub-version">v...</span>
         <div class="hub-spacer"></div>
-        <button class="hub-nav-btn plan advanced-only" onclick="openSubscriptionModal()">Plans</button>
+        <button id="hub-advanced-mode-toggle" class="advanced-mode-toggle hub-mode-toggle" onclick="toggleAdvancedMode()" title="Базовий / розширений режим">Basic</button>
+<button class="hub-nav-btn plan" onclick="openSubscriptionModal()">Підписка</button>
 <a class="hub-nav-btn hub-telegram-btn" href="https://t.me/LinkorLab" target="_blank" rel="noopener noreferrer">Telegram</a>
-<button class="hub-nav-btn advanced-only" onclick="syncCurrentUserToSupabase()">Sync</button>
-<button class="hub-nav-btn advanced-only" onclick="loadCurrentUserFromSupabase()">Load Cloud</button>
-<div class="sync-status local advanced-only" id="sync-status" title="Cloud sync status">Local only</div>
-<button class="hub-nav-btn locked advanced-only" onclick="openFriendsLocked()">Friends</button>
-<button class="hub-nav-btn" onclick="showPage('settings')" data-tour="about-system">Settings</button>
+<button class="hub-nav-btn" onclick="syncCurrentUserToSupabase()">Синхронізація</button>
+<button class="hub-nav-btn" onclick="loadCurrentUserFromSupabase()">Хмара</button>
+<div class="sync-status local" id="sync-status" title="Статус синхронізації">Локально</div>
+<button class="hub-nav-btn locked" onclick="openFriendsLocked()">Друзі</button>
+<button class="hub-nav-btn" onclick="showPage('settings')" data-tour="about-system">Налаштування</button>
+<button class="hub-logout-btn" onclick="doLogout()">Вийти</button>
+<button class="hub-power-btn" onclick="quitAppSafely()" title="Закрити програму" aria-label="Закрити програму">&#x23FB;</button>
 
 <div class="hub-user" onclick="openProfileModal()">
     <div class="hub-avatar" id="hub-avatar">NS</div>
@@ -193,8 +196,11 @@
                             <button class="canvas-ctrl-btn" onclick="zoom(1.2)">＋</button>
                             <div class="canvas-zoom-label" id="zoom-label">100%</div>
                             <button class="canvas-ctrl-btn" onclick="zoom(0.8)">－</button>
-                            <button class="canvas-ctrl-btn" onclick="fitView()" style="font-size:12px">⊡</button>
+                            <button class="canvas-ctrl-btn" onclick="fitView()" title="Показати всю карту" style="font-size:12px">⊡</button>
+                            <button class="canvas-ctrl-btn" onclick="centerSelectedNode()" title="Центрувати вузол" style="font-size:12px">⌖</button>
                             <button class="canvas-ctrl-btn advanced-only" id="snap-grid-toggle" onclick="toggleSnapGrid()">⌗</button>                       </div>
+                        <button class="tool-btn" onclick="exportSpacePNG(false)"><span class="tool-btn-icon">▣</span> Експортувати PNG</button>
+                        <button class="tool-btn" onclick="copySpaceImage()"><span class="tool-btn-icon">⧉</span> Скопіювати як зображення</button>
                         <button class="tool-btn hotkeys-help-btn" onclick="showHotkeysHelp()">
                             <span class="tool-btn-icon">⌘</span> Hotkeys
                         </button>
@@ -350,6 +356,8 @@
         <label class="editor-label">Тип вузла</label>
         <select class="editor-input" id="editor-type"></select>
     </div>
+
+    <div class="editor-field focus-editor-field" id="focus-editor-panel" style="display:none"></div>
 
     <div class="editor-field">
         <label class="editor-label">Колір</label>
